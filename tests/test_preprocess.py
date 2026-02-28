@@ -10,11 +10,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 import soundfile as sf
+import torch
 
 from app.pipelines.preprocess import (
+    DEMUCS_SAMPLE_RATE,
     Segment,
     detect_needs_separation,
     detect_speech_segments,
+    separate_vocals,
 )
 
 
@@ -347,3 +350,212 @@ class TestDetectNeedsSeparation:
             result = detect_needs_separation(audio_path)
 
         assert result is True
+
+
+def _make_mock_demucs_model(sources=None):
+    """Create a mock Demucs model with proper sources attribute."""
+    from unittest.mock import MagicMock
+
+    model = MagicMock()
+    model.sources = sources or ["drums", "bass", "other", "vocals"]
+    model.to.return_value = model
+    model.eval.return_value = model
+    return model
+
+
+class TestSeparateVocals:
+    def test_clean_audio_skips_separation(self, fixtures_dir: Path) -> None:
+        """Clean audio returns original path without running Demucs."""
+        from unittest.mock import patch
+
+        audio_path = fixtures_dir / "clean.wav"
+        samples = np.zeros(16000, dtype=np.float32)
+        sf.write(str(audio_path), samples, 16000, subtype="PCM_16")
+
+        with patch("app.pipelines.preprocess.detect_needs_separation", return_value=False):
+            result = separate_vocals(audio_path)
+
+        assert result == audio_path
+
+    def test_file_not_found_raises_error(self, fixtures_dir: Path) -> None:
+        """Non-existent file raises FileNotFoundError."""
+        with pytest.raises(FileNotFoundError):
+            separate_vocals(fixtures_dir / "nonexistent.wav")
+
+    def test_noisy_audio_runs_separation(self, fixtures_dir: Path) -> None:
+        """Noisy audio triggers Demucs and produces a vocals file."""
+        from unittest.mock import MagicMock, patch
+
+        sr = 16000
+        n_samples = sr * 2
+        audio_path = fixtures_dir / "noisy.wav"
+        samples = np.random.default_rng(42).normal(0, 0.1, n_samples).astype(np.float32)
+        sf.write(str(audio_path), samples, sr, subtype="PCM_16")
+
+        mock_model = _make_mock_demucs_model()
+
+        # apply_model returns (batch=1, sources=4, channels=2, resampled_samples)
+        resampled_len = int(n_samples * DEMUCS_SAMPLE_RATE / sr)
+        fake_estimates = torch.randn(1, 4, 2, resampled_len)
+        mock_apply = MagicMock(return_value=fake_estimates)
+
+        with (
+            patch("app.pipelines.preprocess.detect_needs_separation", return_value=True),
+            patch("app.pipelines.preprocess._load_demucs_model", return_value=mock_model),
+            patch("demucs.apply.apply_model", mock_apply),
+        ):
+            result = separate_vocals(audio_path)
+
+        assert result != audio_path
+        assert result.stem.endswith("_vocals")
+        assert result.exists()
+
+    def test_output_is_valid_wav(self, fixtures_dir: Path) -> None:
+        """Output file is a valid WAV with correct sample rate."""
+        from unittest.mock import MagicMock, patch
+
+        sr = 16000
+        n_samples = sr * 2
+        audio_path = fixtures_dir / "valid_wav.wav"
+        samples = np.random.default_rng(42).normal(0, 0.1, n_samples).astype(np.float32)
+        sf.write(str(audio_path), samples, sr, subtype="PCM_16")
+
+        mock_model = _make_mock_demucs_model()
+        resampled_len = int(n_samples * DEMUCS_SAMPLE_RATE / sr)
+        fake_estimates = torch.randn(1, 4, 2, resampled_len)
+        mock_apply = MagicMock(return_value=fake_estimates)
+
+        with (
+            patch("app.pipelines.preprocess.detect_needs_separation", return_value=True),
+            patch("app.pipelines.preprocess._load_demucs_model", return_value=mock_model),
+            patch("demucs.apply.apply_model", mock_apply),
+        ):
+            result = separate_vocals(audio_path)
+
+        info = sf.info(str(result))
+        assert info.samplerate == sr
+        assert info.channels == 1
+
+    def test_mono_input_is_duplicated_to_stereo(self, fixtures_dir: Path) -> None:
+        """Mono input is converted to stereo for htdemucs."""
+        from unittest.mock import MagicMock, patch
+
+        sr = 44100
+        n_samples = sr * 1
+        audio_path = fixtures_dir / "mono.wav"
+        samples = np.random.default_rng(42).normal(0, 0.1, n_samples).astype(np.float32)
+        sf.write(str(audio_path), samples, sr, subtype="PCM_16")
+
+        mock_model = _make_mock_demucs_model()
+        fake_estimates = torch.randn(1, 4, 2, n_samples)
+        mock_apply = MagicMock(return_value=fake_estimates)
+
+        with (
+            patch("app.pipelines.preprocess.detect_needs_separation", return_value=True),
+            patch("app.pipelines.preprocess._load_demucs_model", return_value=mock_model),
+            patch("demucs.apply.apply_model", mock_apply),
+        ):
+            separate_vocals(audio_path)
+
+        # Check that apply_model received stereo input (batch=1, channels=2, samples)
+        call_args = mock_apply.call_args
+        mix_tensor = call_args[0][1]
+        assert mix_tensor.shape[1] == 2
+
+    def test_stereo_input_not_duplicated(self, fixtures_dir: Path) -> None:
+        """Stereo input passes through without channel duplication."""
+        from unittest.mock import MagicMock, patch
+
+        sr = 44100
+        n_samples = sr * 1
+        audio_path = fixtures_dir / "stereo.wav"
+        mono = np.random.default_rng(42).normal(0, 0.1, n_samples).astype(np.float32)
+        stereo = np.column_stack([mono, mono])
+        sf.write(str(audio_path), stereo, sr, subtype="PCM_16")
+
+        mock_model = _make_mock_demucs_model()
+        fake_estimates = torch.randn(1, 4, 2, n_samples)
+        mock_apply = MagicMock(return_value=fake_estimates)
+
+        with (
+            patch("app.pipelines.preprocess.detect_needs_separation", return_value=True),
+            patch("app.pipelines.preprocess._load_demucs_model", return_value=mock_model),
+            patch("demucs.apply.apply_model", mock_apply),
+        ):
+            separate_vocals(audio_path)
+
+        call_args = mock_apply.call_args
+        mix_tensor = call_args[0][1]
+        assert mix_tensor.shape[1] == 2
+
+    def test_resampling_when_rate_differs(self, fixtures_dir: Path) -> None:
+        """Audio at non-44100 rate is resampled for Demucs and resampled back."""
+        from unittest.mock import MagicMock, patch
+
+        sr = 16000
+        n_samples = sr * 1
+        audio_path = fixtures_dir / "resample.wav"
+        samples = np.random.default_rng(42).normal(0, 0.1, n_samples).astype(np.float32)
+        sf.write(str(audio_path), samples, sr, subtype="PCM_16")
+
+        mock_model = _make_mock_demucs_model()
+        resampled_len = int(n_samples * DEMUCS_SAMPLE_RATE / sr)
+        fake_estimates = torch.randn(1, 4, 2, resampled_len)
+        mock_apply = MagicMock(return_value=fake_estimates)
+
+        with (
+            patch("app.pipelines.preprocess.detect_needs_separation", return_value=True),
+            patch("app.pipelines.preprocess._load_demucs_model", return_value=mock_model),
+            patch("demucs.apply.apply_model", mock_apply),
+        ):
+            result = separate_vocals(audio_path)
+
+        # Output should be at original sample rate
+        info = sf.info(str(result))
+        assert info.samplerate == sr
+
+    def test_returns_path_object(self, fixtures_dir: Path) -> None:
+        """Return value is a Path object."""
+        from unittest.mock import MagicMock, patch
+
+        sr = 16000
+        audio_path = fixtures_dir / "path_check.wav"
+        samples = np.zeros(sr, dtype=np.float32)
+        sf.write(str(audio_path), samples, sr, subtype="PCM_16")
+
+        mock_model = _make_mock_demucs_model()
+        resampled_len = int(sr * DEMUCS_SAMPLE_RATE / sr)
+        fake_estimates = torch.randn(1, 4, 2, resampled_len)
+        mock_apply = MagicMock(return_value=fake_estimates)
+
+        with (
+            patch("app.pipelines.preprocess.detect_needs_separation", return_value=True),
+            patch("app.pipelines.preprocess._load_demucs_model", return_value=mock_model),
+            patch("demucs.apply.apply_model", mock_apply),
+        ):
+            result = separate_vocals(audio_path)
+
+        assert isinstance(result, Path)
+
+    def test_load_demucs_model_caches(self) -> None:
+        """_load_demucs_model caches the model after first load."""
+        from unittest.mock import MagicMock, patch
+
+        import app.pipelines.preprocess as preprocess_mod
+
+        original = preprocess_mod._demucs_model
+        try:
+            preprocess_mod._demucs_model = None
+
+            mock_get_model = MagicMock()
+            mock_model = MagicMock()
+            mock_get_model.return_value = mock_model
+
+            with patch("demucs.pretrained.get_model", mock_get_model):
+                result1 = preprocess_mod._load_demucs_model()
+                result2 = preprocess_mod._load_demucs_model()
+
+            assert result1 is result2
+            mock_get_model.assert_called_once()
+        finally:
+            preprocess_mod._demucs_model = original

@@ -222,12 +222,12 @@
 ---
 
 ### 2.2 — Demucs source separation
-- [ ] Implement `separate_vocals(audio_path: Path) -> Path` in `app/pipelines/preprocess.py`
+- [x] Implement `separate_vocals(audio_path: Path) -> Path` in `app/pipelines/preprocess.py`
   - Use `htdemucs` model for vocal/music separation
   - Return path to isolated vocals track
   - Conditional: skip if `detect_needs_separation` returns False
-- [ ] Handle MPS/CUDA/CPU device selection from config
-- [ ] Manage model loading (lazy load, cache in memory)
+- [x] Handle MPS/CUDA/CPU device selection from config
+- [x] Manage model loading (lazy load, cache in memory)
 
 **Pass criteria:**
 - Audio with background music → vocals track with music significantly reduced

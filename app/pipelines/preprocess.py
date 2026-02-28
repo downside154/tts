@@ -13,6 +13,9 @@ from typing import NamedTuple
 import numpy as np
 import soundfile as sf
 import torch
+import torchaudio
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +32,12 @@ class Segment(NamedTuple):
     confidence: float
 
 
+DEMUCS_SAMPLE_RATE = 44100
+DEMUCS_MODEL_NAME = "htdemucs"
+
 _vad_model = None
 _vad_utils = None
+_demucs_model = None
 
 
 def _load_vad_model():
@@ -45,6 +52,88 @@ def _load_vad_model():
         )
         logger.info("Silero VAD model loaded")
     return _vad_model, _vad_utils
+
+
+def _load_demucs_model():
+    """Lazily load and cache the Demucs htdemucs model."""
+    global _demucs_model
+    if _demucs_model is None:
+        from demucs.pretrained import get_model
+
+        logger.info("Loading Demucs %s model...", DEMUCS_MODEL_NAME)
+        _demucs_model = get_model(DEMUCS_MODEL_NAME)
+        _demucs_model.eval()
+        logger.info("Demucs model loaded")
+    return _demucs_model
+
+
+def separate_vocals(audio_path: Path) -> Path:
+    """Separate vocals from background music/noise using Demucs.
+
+    If the audio is clean (SNR >= 20dB), skips separation and returns
+    the original path. Otherwise, runs htdemucs to isolate the vocals
+    track and saves it as a WAV file.
+
+    Args:
+        audio_path: Path to the input audio file.
+
+    Returns:
+        Path to the isolated vocals WAV file, or the original path
+        if separation was not needed.
+
+    Raises:
+        FileNotFoundError: If the audio file does not exist.
+    """
+    audio_path = Path(audio_path)
+    if not audio_path.exists():
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+    if not detect_needs_separation(audio_path):
+        logger.info("Audio %s is clean — skipping separation", audio_path.name)
+        return audio_path
+
+    from demucs.apply import apply_model
+
+    model = _load_demucs_model()
+    device = torch.device(settings.device.value)
+
+    # Load audio and resample to Demucs expected rate (44100 Hz)
+    wav, orig_sr = torchaudio.load(str(audio_path))
+
+    if wav.shape[0] == 1:
+        wav = wav.repeat(2, 1)  # mono → stereo for htdemucs
+
+    if orig_sr != DEMUCS_SAMPLE_RATE:
+        wav = torchaudio.functional.resample(wav, orig_sr, DEMUCS_SAMPLE_RATE)
+
+    # Demucs expects (batch, channels, samples)
+    mix = wav.unsqueeze(0).to(device)
+    model.to(device)
+
+    with torch.no_grad():
+        estimates = apply_model(model, mix, device=device)
+
+    # htdemucs sources: ['drums', 'bass', 'other', 'vocals']
+    vocals_idx = model.sources.index("vocals")
+    vocals = estimates[0, vocals_idx]  # (channels, samples)
+
+    # Convert back to mono
+    vocals = vocals.mean(dim=0, keepdim=True).cpu()
+
+    # Resample back to original sample rate if needed
+    if orig_sr != DEMUCS_SAMPLE_RATE:
+        vocals = torchaudio.functional.resample(vocals, DEMUCS_SAMPLE_RATE, orig_sr)
+
+    # Save vocals to file
+    output_path = audio_path.with_stem(audio_path.stem + "_vocals")
+    torchaudio.save(str(output_path), vocals, orig_sr)
+
+    logger.info(
+        "Separated vocals from %s → %s",
+        audio_path.name,
+        output_path.name,
+    )
+    return output_path
 
 
 def detect_speech_segments(audio_path: Path) -> list[Segment]:
