@@ -16,15 +16,11 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           version: "latest"
-      - name: Install MeCab (build dependency for python-mecab-ko)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mecab libmecab-dev mecab-ipadic-utf8
-      - run: uv sync --dev
+      - run: uv sync --only-group lint --no-install-project
       - name: Ruff lint
-        run: uv run ruff check .
+        run: uv run --group lint ruff check .
       - name: Type check
-        run: uv run ty check app/
+        run: uv run --group lint ty check app/
 
   test:
     runs-on: macos-latest
@@ -38,6 +34,6 @@ jobs:
           version: "latest"
       - name: Install FFmpeg and MeCab
         run: brew install ffmpeg mecab
-      - run: uv sync --dev
+      - run: uv sync --group test
       - name: Run tests with coverage
-        run: uv run pytest tests/ -v --cov=app --cov-report=term-missing --cov-fail-under=98
+        run: uv run --group test pytest tests/ -v --cov=app --cov-report=term-missing --cov-fail-under=98

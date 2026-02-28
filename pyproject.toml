@@ -33,13 +33,19 @@ dependencies = [
     "torchcodec>=0.10.0",
 ]
 
-[project.optional-dependencies]
-dev = [
+[dependency-groups]
+lint = [
+    "ruff>=0.4",
+    "ty>=0.0.1a1",
+]
+test = [
     "pytest>=7.0",
     "pytest-cov>=6.0",
     "httpx>=0.24",
-    "ruff>=0.4",
-    "ty>=0.0.1a1",
+]
+dev = [
+    { include-group = "lint" },
+    { include-group = "test" },
 ]
 
 [tool.hatch.build.targets.wheel]
