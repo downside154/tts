@@ -156,11 +156,11 @@
 ---
 
 ### 1.5 — FFmpeg audio extraction and normalization
-- [ ] Implement `app/pipelines/ingest.py`:
+- [x] Implement `app/pipelines/ingest.py`:
   - `extract_audio(input_path: Path) -> Path` — use FFmpeg to extract audio from any video/audio format → mono WAV, 24kHz, 16-bit PCM
   - Handle edge cases: already-WAV input, stereo→mono downmix, sample rate conversion
   - Validate output: file exists, non-zero size, correct format
-- [ ] Add FFmpeg subprocess error handling (missing codec, corrupt file, etc.)
+- [x] Add FFmpeg subprocess error handling (missing codec, corrupt file, etc.)
 
 **Pass criteria:**
 - MP4 video → mono WAV 24kHz 16-bit output
