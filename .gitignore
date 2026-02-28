@@ -7,10 +7,6 @@ dist/
 build/
 *.egg
 
-# Tool caches
-.pytest_cache/
-.ruff_cache/
-
 # Virtual environment
 .venv/
 venv/
@@ -48,6 +44,9 @@ docker/volumes/
 
 # Storage
 storage/
+
+# Model cache
+models/
 
 # OS
 .DS_Store
