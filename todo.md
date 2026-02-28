@@ -238,10 +238,10 @@
 ---
 
 ### 2.3 — DeepFilterNet speech enhancement
-- [ ] Implement `enhance_speech(audio_path: Path) -> Path` in `app/pipelines/preprocess.py`
+- [x] Implement `enhance_speech(audio_path: Path) -> Path` in `app/pipelines/preprocess.py`
   - Apply DeepFilterNet for residual noise removal
   - Preserve speech quality (no artifacts on clean speech)
-- [ ] Run after Demucs (if used) or directly on input (if clean)
+- [x] Run after Demucs (if used) or directly on input (if clean)
 
 **Pass criteria:**
 - Noisy speech → cleaner output with improved SNR

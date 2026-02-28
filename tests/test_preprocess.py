@@ -13,12 +13,18 @@ import soundfile as sf
 import torch
 
 from app.pipelines.preprocess import (
+    DEEPFILTER_SAMPLE_RATE,
     DEMUCS_SAMPLE_RATE,
     Segment,
+    _ensure_deepfilter_compat,
     detect_needs_separation,
     detect_speech_segments,
+    enhance_speech,
     separate_vocals,
 )
+
+# Install torchaudio.backend shim so df.enhance can be imported in tests
+_ensure_deepfilter_compat()
 
 
 @pytest.fixture
@@ -559,3 +565,194 @@ class TestSeparateVocals:
             mock_get_model.assert_called_once()
         finally:
             preprocess_mod._demucs_model = original
+
+
+class TestEnhanceSpeech:
+    def test_file_not_found_raises_error(self, fixtures_dir: Path) -> None:
+        """Non-existent file raises FileNotFoundError."""
+        with pytest.raises(FileNotFoundError):
+            enhance_speech(fixtures_dir / "nonexistent.wav")
+
+    def test_produces_enhanced_output(self, fixtures_dir: Path) -> None:
+        """Enhancement produces an output file with _enhanced suffix."""
+        from unittest.mock import MagicMock, patch
+
+        sr = 48000
+        n_samples = sr * 1
+        audio_path = fixtures_dir / "speech.wav"
+        samples = np.random.default_rng(42).normal(0, 0.1, n_samples).astype(np.float32)
+        sf.write(str(audio_path), samples, sr, subtype="PCM_16")
+
+        mock_model = MagicMock()
+        mock_state = MagicMock()
+        mock_enhance = MagicMock(side_effect=lambda m, s, audio: audio)
+
+        with (
+            patch("app.pipelines.preprocess._load_deepfilter_model", return_value=(mock_model, mock_state)),
+            patch("df.enhance.enhance", mock_enhance),
+        ):
+            result = enhance_speech(audio_path)
+
+        assert result.stem.endswith("_enhanced")
+        assert result.exists()
+
+    def test_output_is_valid_wav(self, fixtures_dir: Path) -> None:
+        """Output is a valid WAV with correct sample rate and channels."""
+        from unittest.mock import MagicMock, patch
+
+        sr = 16000
+        n_samples = sr * 1
+        audio_path = fixtures_dir / "valid.wav"
+        samples = np.random.default_rng(42).normal(0, 0.1, n_samples).astype(np.float32)
+        sf.write(str(audio_path), samples, sr, subtype="PCM_16")
+
+        # Mock enhance to return a tensor at DEEPFILTER_SAMPLE_RATE
+        resampled_len = int(n_samples * DEEPFILTER_SAMPLE_RATE / sr)
+
+        def fake_enhance(model, state, audio):
+            return torch.randn(1, resampled_len)
+
+        with (
+            patch("app.pipelines.preprocess._load_deepfilter_model", return_value=(MagicMock(), MagicMock())),
+            patch("df.enhance.enhance", side_effect=fake_enhance),
+        ):
+            result = enhance_speech(audio_path)
+
+        info = sf.info(str(result))
+        assert info.samplerate == sr
+        assert info.channels == 1
+
+    def test_no_resample_at_48khz(self, fixtures_dir: Path) -> None:
+        """Audio already at 48kHz skips resampling."""
+        from unittest.mock import MagicMock, patch
+
+        sr = 48000
+        n_samples = sr * 1
+        audio_path = fixtures_dir / "at48k.wav"
+        samples = np.random.default_rng(42).normal(0, 0.1, n_samples).astype(np.float32)
+        sf.write(str(audio_path), samples, sr, subtype="PCM_16")
+
+        mock_enhance = MagicMock(side_effect=lambda m, s, audio: audio)
+        mock_resample = MagicMock()
+
+        with (
+            patch("app.pipelines.preprocess._load_deepfilter_model", return_value=(MagicMock(), MagicMock())),
+            patch("df.enhance.enhance", mock_enhance),
+            patch("app.pipelines.preprocess.torchaudio.functional.resample", mock_resample),
+        ):
+            enhance_speech(audio_path)
+
+        # resample should not be called since audio is already at 48kHz
+        mock_resample.assert_not_called()
+
+    def test_resampling_when_rate_differs(self, fixtures_dir: Path) -> None:
+        """Audio at non-48kHz is resampled for processing and back."""
+        from unittest.mock import MagicMock, patch
+
+        sr = 16000
+        n_samples = sr * 1
+        audio_path = fixtures_dir / "resample_df.wav"
+        samples = np.random.default_rng(42).normal(0, 0.1, n_samples).astype(np.float32)
+        sf.write(str(audio_path), samples, sr, subtype="PCM_16")
+
+        resampled_len = int(n_samples * DEEPFILTER_SAMPLE_RATE / sr)
+        mock_enhance = MagicMock(side_effect=lambda m, s, audio: torch.randn(1, resampled_len))
+
+        with (
+            patch("app.pipelines.preprocess._load_deepfilter_model", return_value=(MagicMock(), MagicMock())),
+            patch("df.enhance.enhance", mock_enhance),
+        ):
+            result = enhance_speech(audio_path)
+
+        info = sf.info(str(result))
+        assert info.samplerate == sr
+
+    def test_returns_path_object(self, fixtures_dir: Path) -> None:
+        """Return value is a Path object."""
+        from unittest.mock import MagicMock, patch
+
+        sr = 48000
+        audio_path = fixtures_dir / "path_type.wav"
+        samples = np.zeros(sr, dtype=np.float32)
+        sf.write(str(audio_path), samples, sr, subtype="PCM_16")
+
+        mock_enhance = MagicMock(side_effect=lambda m, s, audio: audio)
+
+        with (
+            patch("app.pipelines.preprocess._load_deepfilter_model", return_value=(MagicMock(), MagicMock())),
+            patch("df.enhance.enhance", mock_enhance),
+        ):
+            result = enhance_speech(audio_path)
+
+        assert isinstance(result, Path)
+
+    def test_load_deepfilter_model_caches(self) -> None:
+        """_load_deepfilter_model caches model after first load."""
+        from unittest.mock import MagicMock, patch
+
+        import app.pipelines.preprocess as preprocess_mod
+
+        orig_model = preprocess_mod._deepfilter_model
+        orig_state = preprocess_mod._deepfilter_state
+        try:
+            preprocess_mod._deepfilter_model = None
+            preprocess_mod._deepfilter_state = None
+
+            mock_init = MagicMock(return_value=(MagicMock(), MagicMock(), "suffix"))
+
+            with (
+                patch("app.pipelines.preprocess._ensure_deepfilter_compat"),
+                patch("df.enhance.init_df", mock_init),
+            ):
+                result1 = preprocess_mod._load_deepfilter_model()
+                result2 = preprocess_mod._load_deepfilter_model()
+
+            assert result1 == result2
+            mock_init.assert_called_once()
+        finally:
+            preprocess_mod._deepfilter_model = orig_model
+            preprocess_mod._deepfilter_state = orig_state
+
+    def test_ensure_deepfilter_compat_shim(self) -> None:
+        """_ensure_deepfilter_compat installs torchaudio.backend shim."""
+        import sys
+
+        from app.pipelines.preprocess import _ensure_deepfilter_compat
+
+        # Save and remove existing shim if present
+        saved = {}
+        for key in ["torchaudio.backend", "torchaudio.backend.common"]:
+            if key in sys.modules:
+                saved[key] = sys.modules.pop(key)
+
+        try:
+            _ensure_deepfilter_compat()
+            assert "torchaudio.backend" in sys.modules
+            assert "torchaudio.backend.common" in sys.modules
+            assert hasattr(sys.modules["torchaudio.backend.common"], "AudioMetaData")
+        finally:
+            # Restore original state
+            for key in ["torchaudio.backend", "torchaudio.backend.common"]:
+                sys.modules.pop(key, None)
+            sys.modules.update(saved)
+
+    def test_ensure_deepfilter_compat_idempotent(self) -> None:
+        """Calling _ensure_deepfilter_compat twice doesn't overwrite shim."""
+        import sys
+
+        from app.pipelines.preprocess import _ensure_deepfilter_compat
+
+        saved = {}
+        for key in ["torchaudio.backend", "torchaudio.backend.common"]:
+            if key in sys.modules:
+                saved[key] = sys.modules.pop(key)
+
+        try:
+            _ensure_deepfilter_compat()
+            first_module = sys.modules["torchaudio.backend"]
+            _ensure_deepfilter_compat()
+            assert sys.modules["torchaudio.backend"] is first_module
+        finally:
+            for key in ["torchaudio.backend", "torchaudio.backend.common"]:
+                sys.modules.pop(key, None)
+            sys.modules.update(saved)

@@ -34,10 +34,13 @@ class Segment(NamedTuple):
 
 DEMUCS_SAMPLE_RATE = 44100
 DEMUCS_MODEL_NAME = "htdemucs"
+DEEPFILTER_SAMPLE_RATE = 48000
 
 _vad_model = None
 _vad_utils = None
 _demucs_model = None
+_deepfilter_model = None
+_deepfilter_state = None
 
 
 def _load_vad_model():
@@ -133,6 +136,85 @@ def separate_vocals(audio_path: Path) -> Path:
         audio_path.name,
         output_path.name,
     )
+    return output_path
+
+
+def _ensure_deepfilter_compat():
+    """Install torchaudio.backend shim for DeepFilterNet compatibility.
+
+    DeepFilterNet's df.io imports torchaudio.backend.common.AudioMetaData
+    which was removed in torchaudio >= 2.6. This shim provides a stub
+    so the import chain doesn't break.
+    """
+    import sys
+    import types
+
+    if "torchaudio.backend" not in sys.modules:
+        backend = types.ModuleType("torchaudio.backend")
+        common = types.ModuleType("torchaudio.backend.common")
+        common.AudioMetaData = type("AudioMetaData", (), {})  # type: ignore[attr-defined]
+        backend.common = common  # type: ignore[attr-defined]
+        sys.modules["torchaudio.backend"] = backend
+        sys.modules["torchaudio.backend.common"] = common
+
+
+def _load_deepfilter_model():
+    """Lazily load and cache the DeepFilterNet model."""
+    global _deepfilter_model, _deepfilter_state
+    if _deepfilter_model is None:
+        _ensure_deepfilter_compat()
+        from df.enhance import init_df
+
+        logger.info("Loading DeepFilterNet model...")
+        _deepfilter_model, _deepfilter_state, _ = init_df(
+            log_file=None,
+        )
+        logger.info("DeepFilterNet model loaded")
+    return _deepfilter_model, _deepfilter_state
+
+
+def enhance_speech(audio_path: Path) -> Path:
+    """Enhance speech audio by removing residual noise with DeepFilterNet.
+
+    Applies DeepFilterNet3 for noise suppression while preserving speech
+    quality. Handles resampling to/from 48kHz as required by the model.
+
+    Args:
+        audio_path: Path to the input audio file.
+
+    Returns:
+        Path to the enhanced WAV file (suffixed with ``_enhanced``).
+
+    Raises:
+        FileNotFoundError: If the audio file does not exist.
+    """
+    audio_path = Path(audio_path)
+    if not audio_path.exists():
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+    _ensure_deepfilter_compat()
+    from df.enhance import enhance
+
+    model, df_state = _load_deepfilter_model()
+
+    wav, orig_sr = torchaudio.load(str(audio_path))
+
+    # Resample to 48kHz if needed
+    if orig_sr != DEEPFILTER_SAMPLE_RATE:
+        wav = torchaudio.functional.resample(wav, orig_sr, DEEPFILTER_SAMPLE_RATE)
+
+    enhanced = enhance(model, df_state, wav)
+
+    # Resample back to original sample rate
+    if orig_sr != DEEPFILTER_SAMPLE_RATE:
+        enhanced = torchaudio.functional.resample(
+            enhanced, DEEPFILTER_SAMPLE_RATE, orig_sr
+        )
+
+    output_path = audio_path.with_stem(audio_path.stem + "_enhanced")
+    torchaudio.save(str(output_path), enhanced, orig_sr)
+
+    logger.info("Enhanced speech: %s → %s", audio_path.name, output_path.name)
     return output_path
 
 
