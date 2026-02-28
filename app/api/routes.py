@@ -26,7 +26,7 @@ ALLOWED_MIME_PREFIXES = ("audio/", "video/")
 
 
 @router.post("/voices/clone", response_model=CloneResponse)
-async def clone_voice(file: UploadFile, db: Session = Depends(get_db)):
+async def clone_voice(file: UploadFile, db: Session = Depends(get_db)):  # noqa: B008
     content_type = file.content_type or ""
     if not any(content_type.startswith(p) for p in ALLOWED_MIME_PREFIXES):
         raise HTTPException(
@@ -38,7 +38,8 @@ async def clone_voice(file: UploadFile, db: Session = Depends(get_db)):
 
     storage_dir = Path(settings.storage_path) / job_id
     storage_dir.mkdir(parents=True, exist_ok=True)
-    file_path = storage_dir / file.filename
+    filename = file.filename or "upload"
+    file_path = storage_dir / filename
     with open(file_path, "wb") as f:
         content = await file.read()
         f.write(content)
@@ -59,7 +60,7 @@ async def clone_voice(file: UploadFile, db: Session = Depends(get_db)):
 
 
 @router.get("/jobs/{job_id}", response_model=JobResponse)
-async def get_job(job_id: str, db: Session = Depends(get_db)):
+async def get_job(job_id: str, db: Session = Depends(get_db)):  # noqa: B008
     job = db.get(Job, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -84,7 +85,7 @@ async def get_audio(audio_id: str):
 
 
 @router.get("/voices", response_model=list[SpeakerProfileResponse])
-async def list_voices(db: Session = Depends(get_db)):
+async def list_voices(db: Session = Depends(get_db)):  # noqa: B008
     profiles = db.query(SpeakerProfile).all()
     return [
         SpeakerProfileResponse(id=p.id, name=p.name, created_at=p.created_at)
@@ -93,7 +94,7 @@ async def list_voices(db: Session = Depends(get_db)):
 
 
 @router.delete("/voices/{voice_id}", response_model=DeleteResponse)
-async def delete_voice(voice_id: str, db: Session = Depends(get_db)):
+async def delete_voice(voice_id: str, db: Session = Depends(get_db)):  # noqa: B008
     profile = db.get(SpeakerProfile, voice_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Speaker profile not found")

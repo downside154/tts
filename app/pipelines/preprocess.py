@@ -9,7 +9,6 @@ import logging
 from pathlib import Path
 from typing import NamedTuple
 
-import soundfile as sf
 import torch
 
 logger = logging.getLogger(__name__)
@@ -111,7 +110,7 @@ def _compute_segment_confidence(
     window_size: int = 512,
 ) -> float:
     """Compute mean VAD probability for an audio chunk."""
-    model.reset_states()
+    model.reset_states()  # type: ignore[operator]
     probs: list[float] = []
 
     for i in range(0, len(audio_chunk), window_size):
@@ -121,5 +120,5 @@ def _compute_segment_confidence(
         prob = model(chunk, SILERO_SAMPLE_RATE).item()
         probs.append(prob)
 
-    model.reset_states()
+    model.reset_states()  # type: ignore[operator]
     return sum(probs) / len(probs) if probs else 0.0

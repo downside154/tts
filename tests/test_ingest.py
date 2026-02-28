@@ -6,18 +6,19 @@ Covers FFmpeg audio extraction from various input formats
 
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 import soundfile as sf
 
 from app.pipelines.ingest import (
-    AudioExtractionError,
-    CorruptFileError,
-    extract_audio,
     TARGET_CHANNELS,
     TARGET_SAMPLE_RATE,
     TARGET_SUBTYPE,
+    AudioExtractionError,
+    CorruptFileError,
+    extract_audio,
 )
 
 
@@ -175,6 +176,107 @@ class TestExtractAudioErrorHandling:
 
         with pytest.raises((CorruptFileError, AudioExtractionError)):
             extract_audio(fake_path, output_dir=fixtures_dir)
+
+
+class TestExtractAudioFFmpegErrors:
+    def test_ffmpeg_not_found(self, fixtures_dir: Path) -> None:
+        """Missing FFmpeg binary raises AudioExtractionError."""
+        wav_path = _generate_sine_wav(fixtures_dir / "input.wav")
+
+        with patch("app.pipelines.ingest.settings") as mock_settings:
+            mock_settings.ffmpeg_path = "/nonexistent/ffmpeg"
+            with pytest.raises(AudioExtractionError, match="FFmpeg not found"):
+                extract_audio(wav_path, output_dir=fixtures_dir)
+
+    def test_ffmpeg_timeout(self, fixtures_dir: Path) -> None:
+        """FFmpeg timeout raises AudioExtractionError."""
+        wav_path = _generate_sine_wav(fixtures_dir / "input.wav")
+
+        with patch("app.pipelines.ingest.subprocess.run") as mock_run:
+            mock_run.side_effect = subprocess.TimeoutExpired(cmd="ffmpeg", timeout=300)
+            with pytest.raises(AudioExtractionError, match="timed out"):
+                extract_audio(wav_path, output_dir=fixtures_dir)
+
+    def test_ffmpeg_non_corrupt_failure(self, fixtures_dir: Path) -> None:
+        """FFmpeg failure that is not a corrupt file error raises AudioExtractionError."""
+        wav_path = _generate_sine_wav(fixtures_dir / "input.wav")
+
+        with patch("app.pipelines.ingest.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["ffmpeg"],
+                returncode=1,
+                stdout="",
+                stderr="Some unknown FFmpeg error occurred",
+            )
+            with pytest.raises(AudioExtractionError, match="FFmpeg failed"):
+                extract_audio(wav_path, output_dir=fixtures_dir)
+
+
+class TestValidateOutput:
+    def test_missing_output_file(self, fixtures_dir: Path) -> None:
+        """Validation fails when output file doesn't exist."""
+        from app.pipelines.ingest import _validate_output
+
+        with pytest.raises(AudioExtractionError, match="no output file"):
+            _validate_output(fixtures_dir / "nonexistent.wav")
+
+    def test_empty_output_file(self, fixtures_dir: Path) -> None:
+        """Validation fails when output file is empty."""
+        from app.pipelines.ingest import _validate_output
+
+        empty_path = fixtures_dir / "empty.wav"
+        empty_path.write_bytes(b"")
+
+        with pytest.raises(AudioExtractionError, match="empty output file"):
+            _validate_output(empty_path)
+
+    def test_invalid_audio_output(self, fixtures_dir: Path) -> None:
+        """Validation fails when output is not valid audio."""
+        from app.pipelines.ingest import _validate_output
+
+        bad_path = fixtures_dir / "bad.wav"
+        bad_path.write_bytes(b"not audio data")
+
+        with pytest.raises(AudioExtractionError, match="not a valid audio file"):
+            _validate_output(bad_path)
+
+    def test_wrong_channel_count(self, fixtures_dir: Path) -> None:
+        """Validation fails when output has wrong number of channels."""
+        from app.pipelines.ingest import _validate_output
+
+        stereo_path = _generate_sine_wav(
+            fixtures_dir / "stereo.wav",
+            sample_rate=TARGET_SAMPLE_RATE,
+            channels=2,
+        )
+
+        with pytest.raises(AudioExtractionError, match="channel"):
+            _validate_output(stereo_path)
+
+    def test_wrong_sample_rate(self, fixtures_dir: Path) -> None:
+        """Validation fails when output has wrong sample rate."""
+        from app.pipelines.ingest import _validate_output
+
+        wrong_sr_path = _generate_sine_wav(
+            fixtures_dir / "wrong_sr.wav",
+            sample_rate=44100,
+            channels=1,
+        )
+
+        with pytest.raises(AudioExtractionError, match="sample rate"):
+            _validate_output(wrong_sr_path)
+
+    def test_wrong_subtype(self, fixtures_dir: Path) -> None:
+        """Validation fails when output has wrong subtype."""
+        from app.pipelines.ingest import _validate_output
+
+        path = fixtures_dir / "wrong_subtype.wav"
+        t = np.linspace(0, 1.0, TARGET_SAMPLE_RATE, endpoint=False)
+        signal = (0.5 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
+        sf.write(str(path), signal, TARGET_SAMPLE_RATE, subtype="FLOAT")
+
+        with pytest.raises(AudioExtractionError, match="subtype"):
+            _validate_output(path)
 
 
 class TestExtractAudioOutputLocation:

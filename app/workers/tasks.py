@@ -67,6 +67,7 @@ def process_voice_clone(self, job_id: str) -> None:
         except Exception:
             logger.error("Failed to update job %s status: %s", job_id, traceback.format_exc())
         logger.error("Job %s failed: %s", job_id, exc)
-        raise self.retry(exc=exc) if self.request.retries < self.max_retries else None
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=exc) from exc
     finally:
         db.close()

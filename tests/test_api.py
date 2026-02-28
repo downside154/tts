@@ -5,6 +5,7 @@ audio retrieval, and error handling.
 """
 
 import io
+import uuid
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from unittest.mock import patch
@@ -15,7 +16,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.models.db import Base, Job, get_db
+from app.models.db import Base, Job, SpeakerProfile, get_db
 
 _engine = create_engine(
     "sqlite:///:memory:",
@@ -122,3 +123,51 @@ def test_list_voices_empty(client):
     response = client.get("/v1/voices")
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_delete_voice_success(client):
+    """Deleting an existing speaker profile returns success."""
+    profile_id = str(uuid.uuid4())
+    db = _TestSession()
+    profile = SpeakerProfile(id=profile_id, name="test-speaker")
+    db.add(profile)
+    db.commit()
+    db.close()
+
+    response = client.delete(f"/v1/voices/{profile_id}")
+    assert response.status_code == 200
+    assert profile_id in response.json()["detail"]
+
+    # Verify it's actually deleted
+    db = _TestSession()
+    assert db.get(SpeakerProfile, profile_id) is None
+    db.close()
+
+
+def test_delete_voice_not_found(client):
+    """Deleting a nonexistent speaker profile returns 404."""
+    response = client.delete("/v1/voices/nonexistent-id")
+    assert response.status_code == 404
+    assert "Speaker profile not found" in response.json()["detail"]
+
+
+def test_health_endpoint(client):
+    """Health endpoint returns ok status."""
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_list_voices_with_profiles(client):
+    """Listing voices returns existing speaker profiles."""
+    db = _TestSession()
+    profile = SpeakerProfile(id=str(uuid.uuid4()), name="speaker-1")
+    db.add(profile)
+    db.commit()
+    db.close()
+
+    response = client.get("/v1/voices")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["name"] == "speaker-1"

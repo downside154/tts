@@ -5,4 +5,3 @@ English abbreviation transliteration, phone number normalization,
 and grapheme-to-phoneme conversion for Korean text.
 """
 
-import unicodedata

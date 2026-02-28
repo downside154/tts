@@ -190,17 +190,19 @@
 ---
 
 ### 1.7 — CI pipeline
-- [ ] Set up GitHub Actions (or local pre-commit hooks) for:
+- [x] Set up GitHub Actions (or local pre-commit hooks) for:
   - Linting (ruff)
   - Type checking (ty)
   - Unit tests (pytest)
-- [ ] Ensure CI runs on every push/PR
+- [x] Ensure CI runs on every push/PR
+- [x] Added pytest-cov with 98% minimum coverage requirement
 
 **Pass criteria:**
 - `ruff check .` passes with zero errors
 - `ty app/` passes (or has explicit ignores documented)
 - `pytest tests/` passes all tests
 - CI pipeline runs and reports pass/fail status
+- Test coverage >= 98% (currently 100%)
 
 ---
 

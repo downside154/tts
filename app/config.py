@@ -4,13 +4,13 @@ Uses pydantic-settings to load configuration from environment variables
 and .env files with typed validation.
 """
 
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class DeviceType(str, Enum):
+class DeviceType(StrEnum):
     CPU = "cpu"
     CUDA = "cuda"
     MPS = "mps"

@@ -75,15 +75,15 @@ def extract_audio(input_path: Path, output_dir: Path | None = None) -> Path:
             text=True,
             timeout=300,
         )
-    except FileNotFoundError:
+    except FileNotFoundError as exc:
         raise AudioExtractionError(
             f"FFmpeg not found at '{settings.ffmpeg_path}'. "
             "Ensure FFmpeg is installed and the path is correct."
-        )
-    except subprocess.TimeoutExpired:
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
         raise AudioExtractionError(
             f"FFmpeg timed out processing '{input_path.name}'"
-        )
+        ) from exc
 
     if result.returncode != 0:
         stderr = result.stderr.strip()
@@ -130,7 +130,7 @@ def _validate_output(output_path: Path) -> None:
     except Exception as exc:
         raise AudioExtractionError(
             f"Output file is not a valid audio file: {exc}"
-        )
+        ) from exc
 
     if info.channels != TARGET_CHANNELS:
         raise AudioExtractionError(
