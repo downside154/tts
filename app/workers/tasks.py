@@ -12,6 +12,7 @@ from pathlib import Path
 from celery import Celery
 
 from app.config import settings
+from app.errors import PipelineError
 from app.models.db import Job, JobStatus, SpeakerProfile, get_session_factory
 from app.pipelines.analyze import build_speaker_profile
 
@@ -27,6 +28,13 @@ celery.conf.update(
     task_acks_late=True,
     task_reject_on_worker_lost=True,
 )
+
+# Pipeline errors that should not be retried (user-actionable)
+_NON_RETRYABLE_ERRORS = frozenset({
+    "no_speech",
+    "insufficient_audio",
+    "audio_corrupt",
+})
 
 
 @celery.task(
@@ -76,17 +84,30 @@ def process_voice_clone(self, job_id: str) -> None:
 
     except Exception as exc:
         db.rollback()
+
+        # Extract error_code and user_message from typed pipeline errors
+        if isinstance(exc, PipelineError):
+            error_code = exc.error_code
+            error_message = exc.user_message
+        else:
+            error_code = "processing_error"
+            error_message = f"{type(exc).__name__}: {exc}"
+
         # Update job as failed
         try:
             job = db.get(Job, job_id)
             if job:
                 job.status = JobStatus.FAILED
-                job.error_message = f"{type(exc).__name__}: {exc}"
+                job.error_code = error_code
+                job.error_message = error_message
                 db.commit()
         except Exception:
             logger.error("Failed to update job %s status: %s", job_id, traceback.format_exc())
-        logger.error("Job %s failed: %s", job_id, exc)
-        if self.request.retries < self.max_retries:
+
+        logger.error("Job %s failed (%s): %s", job_id, error_code, exc)
+
+        # Only retry errors that are not user-actionable
+        if error_code not in _NON_RETRYABLE_ERRORS and self.request.retries < self.max_retries:
             raise self.retry(exc=exc) from exc
     finally:
         db.close()

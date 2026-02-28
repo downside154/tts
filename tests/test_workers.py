@@ -1,7 +1,7 @@
 """Tests for Celery worker tasks.
 
 Covers the process_voice_clone task including success, failure,
-retry logic, and error handling.
+retry logic, error categorization, and error handling.
 """
 
 from unittest.mock import MagicMock, patch
@@ -10,6 +10,12 @@ import pytest
 from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.errors import (
+    AudioCorruptError,
+    InsufficientAudioError,
+    NoSpeechDetectedError,
+    ProcessingError,
+)
 from app.models.db import Base, Job, JobStatus, SpeakerProfile
 
 _engine = create_engine(
@@ -222,3 +228,230 @@ class TestProcessVoiceClone:
                 process_voice_clone.run("job-double-fail")
         finally:
             process_voice_clone.pop_request()
+
+    def test_no_speech_error_sets_error_code(self, _mock_factory) -> None:
+        """NoSpeechDetectedError sets error_code='no_speech' on the job."""
+        from app.workers.tasks import process_voice_clone
+
+        _create_job("job-nospeech")
+
+        process_voice_clone.push_request(retries=0)
+        try:
+            with patch(
+                "app.workers.tasks.build_speaker_profile",
+                side_effect=NoSpeechDetectedError(stage="diarization"),
+            ):
+                process_voice_clone.run("job-nospeech")
+        finally:
+            process_voice_clone.pop_request()
+
+        db = _TestSession()
+        job = db.get(Job, "job-nospeech")
+        assert job.status == JobStatus.FAILED
+        assert job.error_code == "no_speech"
+        assert job.error_message == "No speech detected in the uploaded file"
+        db.close()
+
+    def test_insufficient_audio_error_sets_error_code(self, _mock_factory) -> None:
+        """InsufficientAudioError sets error_code='insufficient_audio'."""
+        from app.workers.tasks import process_voice_clone
+
+        _create_job("job-short")
+
+        process_voice_clone.push_request(retries=0)
+        try:
+            with patch(
+                "app.workers.tasks.build_speaker_profile",
+                side_effect=InsufficientAudioError(stage="segment_selection"),
+            ):
+                process_voice_clone.run("job-short")
+        finally:
+            process_voice_clone.pop_request()
+
+        db = _TestSession()
+        job = db.get(Job, "job-short")
+        assert job.status == JobStatus.FAILED
+        assert job.error_code == "insufficient_audio"
+        assert job.error_message == "At least 3 seconds of speech required"
+        db.close()
+
+    def test_audio_corrupt_error_sets_error_code(self, _mock_factory) -> None:
+        """AudioCorruptError sets error_code='audio_corrupt'."""
+        from app.workers.tasks import process_voice_clone
+
+        _create_job("job-corrupt")
+
+        process_voice_clone.push_request(retries=0)
+        try:
+            with patch(
+                "app.workers.tasks.build_speaker_profile",
+                side_effect=AudioCorruptError(stage="input_validation"),
+            ):
+                process_voice_clone.run("job-corrupt")
+        finally:
+            process_voice_clone.pop_request()
+
+        db = _TestSession()
+        job = db.get(Job, "job-corrupt")
+        assert job.status == JobStatus.FAILED
+        assert job.error_code == "audio_corrupt"
+        assert job.error_message == "The audio file is corrupt or in an unsupported format"
+        db.close()
+
+    def test_processing_error_sets_error_code(self, _mock_factory) -> None:
+        """ProcessingError sets error_code='processing_error'."""
+        from app.workers.tasks import process_voice_clone
+
+        _create_job("job-procerr")
+
+        # retries=2 (at max) so retry is not attempted
+        process_voice_clone.push_request(retries=2)
+        try:
+            with patch(
+                "app.workers.tasks.build_speaker_profile",
+                side_effect=ProcessingError("GPU failed", stage="separation"),
+            ):
+                process_voice_clone.run("job-procerr")
+        finally:
+            process_voice_clone.pop_request()
+
+        db = _TestSession()
+        job = db.get(Job, "job-procerr")
+        assert job.status == JobStatus.FAILED
+        assert job.error_code == "processing_error"
+        assert job.error_message == "An error occurred during processing"
+        db.close()
+
+    def test_generic_exception_sets_processing_error_code(self, _mock_factory) -> None:
+        """Non-pipeline exceptions get error_code='processing_error' with raw message."""
+        from app.workers.tasks import process_voice_clone
+
+        _create_job("job-generic")
+
+        process_voice_clone.push_request(retries=2)
+        try:
+            with patch(
+                "app.workers.tasks.build_speaker_profile",
+                side_effect=RuntimeError("Unexpected crash"),
+            ):
+                process_voice_clone.run("job-generic")
+        finally:
+            process_voice_clone.pop_request()
+
+        db = _TestSession()
+        job = db.get(Job, "job-generic")
+        assert job.status == JobStatus.FAILED
+        assert job.error_code == "processing_error"
+        assert "RuntimeError" in job.error_message
+        assert "Unexpected crash" in job.error_message
+        db.close()
+
+    def test_no_speech_error_does_not_retry(self, _mock_factory) -> None:
+        """NoSpeechDetectedError should NOT trigger retry (user-actionable)."""
+        from app.workers.tasks import process_voice_clone
+
+        _create_job("job-no-retry-speech")
+
+        mock_retry = MagicMock(side_effect=ValueError("should not be called"))
+
+        process_voice_clone.push_request(retries=0)
+        try:
+            with (
+                patch(
+                    "app.workers.tasks.build_speaker_profile",
+                    side_effect=NoSpeechDetectedError(),
+                ),
+                patch.object(
+                    type(process_voice_clone._get_current_object()),
+                    "retry",
+                    mock_retry,
+                ),
+            ):
+                process_voice_clone.run("job-no-retry-speech")
+        finally:
+            process_voice_clone.pop_request()
+
+        mock_retry.assert_not_called()
+
+    def test_insufficient_audio_does_not_retry(self, _mock_factory) -> None:
+        """InsufficientAudioError should NOT trigger retry."""
+        from app.workers.tasks import process_voice_clone
+
+        _create_job("job-no-retry-short")
+
+        mock_retry = MagicMock(side_effect=ValueError("should not be called"))
+
+        process_voice_clone.push_request(retries=0)
+        try:
+            with (
+                patch(
+                    "app.workers.tasks.build_speaker_profile",
+                    side_effect=InsufficientAudioError(),
+                ),
+                patch.object(
+                    type(process_voice_clone._get_current_object()),
+                    "retry",
+                    mock_retry,
+                ),
+            ):
+                process_voice_clone.run("job-no-retry-short")
+        finally:
+            process_voice_clone.pop_request()
+
+        mock_retry.assert_not_called()
+
+    def test_audio_corrupt_does_not_retry(self, _mock_factory) -> None:
+        """AudioCorruptError should NOT trigger retry."""
+        from app.workers.tasks import process_voice_clone
+
+        _create_job("job-no-retry-corrupt")
+
+        mock_retry = MagicMock(side_effect=ValueError("should not be called"))
+
+        process_voice_clone.push_request(retries=0)
+        try:
+            with (
+                patch(
+                    "app.workers.tasks.build_speaker_profile",
+                    side_effect=AudioCorruptError(),
+                ),
+                patch.object(
+                    type(process_voice_clone._get_current_object()),
+                    "retry",
+                    mock_retry,
+                ),
+            ):
+                process_voice_clone.run("job-no-retry-corrupt")
+        finally:
+            process_voice_clone.pop_request()
+
+        mock_retry.assert_not_called()
+
+    def test_processing_error_retries(self) -> None:
+        """ProcessingError (retryable) triggers retry when retries remain."""
+        from app.workers.tasks import process_voice_clone
+
+        _create_job("job-retry-proc")
+
+        mock_retry = MagicMock(side_effect=ValueError("retry triggered"))
+
+        process_voice_clone.push_request(retries=0)
+        try:
+            with (
+                patch("app.workers.tasks.get_session_factory", return_value=_TestSession),
+                patch(
+                    "app.workers.tasks.build_speaker_profile",
+                    side_effect=ProcessingError("Transient failure", stage="separation"),
+                ),
+                patch.object(
+                    type(process_voice_clone._get_current_object()),
+                    "retry",
+                    mock_retry,
+                ),
+                pytest.raises(ValueError, match="retry triggered"),
+            ):
+                process_voice_clone.run("job-retry-proc")
+        finally:
+            process_voice_clone.pop_request()
+
+        mock_retry.assert_called_once()

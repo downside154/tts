@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.models.db import Base, Job, SpeakerProfile, get_db
+from app.models.db import Base, Job, JobStatus, SpeakerProfile, get_db
 
 _engine = create_engine(
     "sqlite:///:memory:",
@@ -171,3 +171,91 @@ def test_list_voices_with_profiles(client):
     data = response.json()
     assert len(data) == 1
     assert data[0]["name"] == "speaker-1"
+
+
+def test_job_error_code_returned(client):
+    """Failed job returns error_code and user-friendly error_message."""
+    job_id = str(uuid.uuid4())
+    db = _TestSession()
+    job = Job(
+        id=job_id,
+        status=JobStatus.FAILED,
+        input_file_path="/tmp/test.wav",
+        error_code="no_speech",
+        error_message="No speech detected in the uploaded file",
+    )
+    db.add(job)
+    db.commit()
+    db.close()
+
+    response = client.get(f"/v1/jobs/{job_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "failed"
+    assert data["error_code"] == "no_speech"
+    assert data["error_message"] == "No speech detected in the uploaded file"
+
+
+def test_job_error_code_null_on_success(client):
+    """Successful job has null error_code and error_message."""
+    job_id = str(uuid.uuid4())
+    db = _TestSession()
+    job = Job(
+        id=job_id,
+        status=JobStatus.COMPLETED,
+        input_file_path="/tmp/test.wav",
+        stage="done",
+        progress=100.0,
+    )
+    db.add(job)
+    db.commit()
+    db.close()
+
+    response = client.get(f"/v1/jobs/{job_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "completed"
+    assert data["error_code"] is None
+    assert data["error_message"] is None
+
+
+def test_job_insufficient_audio_error_code(client):
+    """Job with insufficient_audio error code returns correct response."""
+    job_id = str(uuid.uuid4())
+    db = _TestSession()
+    job = Job(
+        id=job_id,
+        status=JobStatus.FAILED,
+        input_file_path="/tmp/short.wav",
+        error_code="insufficient_audio",
+        error_message="At least 3 seconds of speech required",
+    )
+    db.add(job)
+    db.commit()
+    db.close()
+
+    response = client.get(f"/v1/jobs/{job_id}")
+    data = response.json()
+    assert data["error_code"] == "insufficient_audio"
+    assert data["error_message"] == "At least 3 seconds of speech required"
+
+
+def test_job_audio_corrupt_error_code(client):
+    """Job with audio_corrupt error code returns correct response."""
+    job_id = str(uuid.uuid4())
+    db = _TestSession()
+    job = Job(
+        id=job_id,
+        status=JobStatus.FAILED,
+        input_file_path="/tmp/bad.wav",
+        error_code="audio_corrupt",
+        error_message="The audio file is corrupt or in an unsupported format",
+    )
+    db.add(job)
+    db.commit()
+    db.close()
+
+    response = client.get(f"/v1/jobs/{job_id}")
+    data = response.json()
+    assert data["error_code"] == "audio_corrupt"
+    assert "corrupt" in data["error_message"]

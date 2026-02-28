@@ -69,6 +69,7 @@ async def get_job(job_id: str, db: Session = Depends(get_db)):  # noqa: B008
         status=job.status.value,
         stage=job.stage,
         progress=job.progress,
+        error_code=job.error_code,
         error_message=job.error_message,
         speaker_profile_id=job.speaker_profile_id,
     )

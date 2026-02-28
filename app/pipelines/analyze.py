@@ -17,6 +17,13 @@ import soundfile as sf
 import torch
 
 from app.config import settings
+from app.errors import (
+    AudioCorruptError,
+    InsufficientAudioError,
+    NoSpeechDetectedError,
+    PipelineError,
+    ProcessingError,
+)
 from app.pipelines.diarize import SpeakerSegment
 
 logger = logging.getLogger(__name__)
@@ -396,6 +403,9 @@ def _compute_quality_summary(
     }
 
 
+MIN_SPEECH_DURATION = 3.0
+
+
 def build_speaker_profile(audio_path: Path, job_id: str) -> dict:
     """Build a complete speaker profile from an audio file.
 
@@ -415,14 +425,29 @@ def build_speaker_profile(audio_path: Path, job_id: str) -> dict:
         ``dominant_speaker_id``, ``quality_summary``.
 
     Raises:
-        FileNotFoundError: If the audio file does not exist.
+        AudioCorruptError: If the audio file cannot be decoded.
+        NoSpeechDetectedError: If no speech is found in the audio.
+        InsufficientAudioError: If total usable speech is < 3 seconds.
+        ProcessingError: If an unexpected error occurs during processing.
     """
     from app.pipelines.diarize import diarize_speakers, select_dominant_speaker
     from app.pipelines.preprocess import enhance_speech, separate_vocals
 
     audio_path = Path(audio_path)
     if not audio_path.exists():
-        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+        raise AudioCorruptError(
+            f"Audio file not found: {audio_path}",
+            stage="input_validation",
+        )
+
+    # Validate the file is readable audio
+    try:
+        sf.info(str(audio_path))
+    except Exception as exc:
+        raise AudioCorruptError(
+            f"Cannot read audio file '{audio_path.name}': {exc}",
+            stage="input_validation",
+        ) from exc
 
     # Create output directories
     output_dir = settings.storage_path / job_id
@@ -431,13 +456,41 @@ def build_speaker_profile(audio_path: Path, job_id: str) -> dict:
     segments_dir.mkdir(exist_ok=True)
 
     # 1. Source separation (if needed)
-    processed_path = separate_vocals(audio_path)
+    try:
+        processed_path = separate_vocals(audio_path)
+    except PipelineError:
+        raise
+    except Exception as exc:
+        raise ProcessingError(
+            f"Source separation failed: {exc}",
+            stage="separation",
+        ) from exc
 
     # 2. Speech enhancement
-    processed_path = enhance_speech(processed_path)
+    try:
+        processed_path = enhance_speech(processed_path)
+    except PipelineError:
+        raise
+    except Exception as exc:
+        raise ProcessingError(
+            f"Speech enhancement failed: {exc}",
+            stage="enhancement",
+        ) from exc
 
     # 3. Diarization
-    speaker_segments = diarize_speakers(processed_path)
+    try:
+        speaker_segments = diarize_speakers(processed_path)
+    except PipelineError:
+        raise
+    except Exception as exc:
+        raise ProcessingError(
+            f"Speaker diarization failed: {exc}",
+            stage="diarization",
+        ) from exc
+
+    if not speaker_segments:
+        raise NoSpeechDetectedError(stage="diarization")
+
     speaker_count = len({s.speaker_id for s in speaker_segments})
 
     # 4. Select dominant speaker and filter
@@ -455,7 +508,16 @@ def build_speaker_profile(audio_path: Path, job_id: str) -> dict:
     # 7. Select best segments
     selected = select_best_segments(scored)
 
-    # 8. Extract segment WAVs
+    # 8. Check total duration is sufficient
+    total_duration = sum(s.end - s.start for s in selected)
+    if total_duration < MIN_SPEECH_DURATION:
+        raise InsufficientAudioError(
+            f"Only {total_duration:.1f}s of usable speech found "
+            f"(minimum {MIN_SPEECH_DURATION:.0f}s required)",
+            stage="segment_selection",
+        )
+
+    # 9. Extract segment WAVs
     data, sr = sf.read(str(processed_path), dtype="float32")
     if data.ndim > 1:
         data = data[:, 0]
@@ -473,16 +535,24 @@ def build_speaker_profile(audio_path: Path, job_id: str) -> dict:
             "quality_score": seg.quality_score,
         })
 
-    # 9. Compute speaker embedding
-    embedding = compute_speaker_embedding(processed_path, selected)
+    # 10. Compute speaker embedding
+    try:
+        embedding = compute_speaker_embedding(processed_path, selected)
+    except PipelineError:
+        raise
+    except Exception as exc:
+        raise ProcessingError(
+            f"Speaker embedding computation failed: {exc}",
+            stage="embedding",
+        ) from exc
+
     embedding_path = output_dir / "embedding.npy"
     np.save(str(embedding_path), embedding)
 
-    # 10. Quality summary
+    # 11. Quality summary
     quality_summary = _compute_quality_summary(data, sr, selected)
 
-    # 11. Assemble profile
-    total_duration = sum(s.end - s.start for s in selected)
+    # 12. Assemble profile
     profile = {
         "id": str(uuid.uuid4()),
         "created_at": datetime.now(UTC).isoformat(),

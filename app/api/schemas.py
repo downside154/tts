@@ -19,6 +19,7 @@ class JobResponse(BaseModel):
     status: str
     stage: str | None = None
     progress: float | None = None
+    error_code: str | None = None
     error_message: str | None = None
     speaker_profile_id: str | None = None
 

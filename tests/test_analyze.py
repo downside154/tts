@@ -1,7 +1,8 @@
 """Tests for the audio analysis pipeline.
 
 Covers merge_segments, score_segment, select_best_segments,
-sub-score helpers, compute_speaker_embedding, and build_speaker_profile.
+sub-score helpers, compute_speaker_embedding, build_speaker_profile,
+and pipeline error handling.
 """
 
 import json
@@ -15,6 +16,12 @@ import soundfile as sf
 import torch
 
 from app.config import settings
+from app.errors import (
+    AudioCorruptError,
+    InsufficientAudioError,
+    NoSpeechDetectedError,
+    ProcessingError,
+)
 from app.pipelines.analyze import (
     CLIPPING_THRESHOLD,
     MAX_ACCEPTABLE_DURATION,
@@ -701,9 +708,9 @@ class TestBuildSpeakerProfile:
         assert isinstance(qs["mean_snr"], float)
         assert isinstance(qs["clipped_segments"], int)
 
-    def test_file_not_found(self, fixtures_dir: Path) -> None:
-        """Non-existent file raises FileNotFoundError."""
-        with pytest.raises(FileNotFoundError):
+    def test_file_not_found_raises_audio_corrupt(self, fixtures_dir: Path) -> None:
+        """Non-existent file raises AudioCorruptError."""
+        with pytest.raises(AudioCorruptError):
             build_speaker_profile(fixtures_dir / "missing.wav", "job-x")
 
     def test_source_file_is_filename(self, fixtures_dir: Path, tmp_path: Path) -> None:
@@ -734,3 +741,287 @@ class TestBuildSpeakerProfile:
 
         assert profile["dominant_speaker_id"] == "SPEAKER_00"
         assert len(profile["segments"]) > 0
+
+
+# ── build_speaker_profile error handling ──────────────────────────
+
+
+def _error_profile_context(
+    audio_path: Path,
+    storage: Path,
+    *,
+    diarize_return=None,
+    separate_side_effect=None,
+    enhance_side_effect=None,
+    diarize_side_effect=None,
+    embedding_side_effect=None,
+) -> ExitStack:
+    """Build an ExitStack with configurable failures for error tests."""
+    mock_ecapa = MagicMock()
+    mock_ecapa.encode_batch.return_value = torch.zeros(1, 1, 192)
+
+    stack = ExitStack()
+    stack.enter_context(patch(
+        "app.pipelines.preprocess.separate_vocals",
+        side_effect=separate_side_effect or (lambda p: p),
+    ))
+    stack.enter_context(patch(
+        "app.pipelines.preprocess.enhance_speech",
+        side_effect=enhance_side_effect or (lambda p: p),
+    ))
+    stack.enter_context(patch(
+        "app.pipelines.diarize.diarize_speakers",
+        side_effect=diarize_side_effect,
+        return_value=diarize_return if diarize_side_effect is None else None,
+    ))
+    stack.enter_context(patch(
+        "app.pipelines.diarize.select_dominant_speaker",
+        return_value="SPEAKER_00",
+    ))
+    stack.enter_context(patch(
+        "app.pipelines.analyze._load_ecapa_model",
+        side_effect=embedding_side_effect,
+        return_value=mock_ecapa if embedding_side_effect is None else None,
+    ))
+    stack.enter_context(patch.object(settings, "storage_path", storage))
+    return stack
+
+
+class TestBuildSpeakerProfileErrors:
+    def test_no_speech_raises_error(self, fixtures_dir: Path, tmp_path: Path) -> None:
+        """Empty diarization result raises NoSpeechDetectedError."""
+        audio_path = _make_audio(fixtures_dir / "silent.wav", duration=3.0)
+        storage = tmp_path / "storage"
+
+        with _error_profile_context(audio_path, storage, diarize_return=[]):
+            with pytest.raises(NoSpeechDetectedError) as exc_info:
+                build_speaker_profile(audio_path, "job-nospeech")
+
+        assert exc_info.value.error_code == "no_speech"
+        assert exc_info.value.user_message == "No speech detected in the uploaded file"
+        assert exc_info.value.stage == "diarization"
+
+    def test_insufficient_audio_raises_error(self, fixtures_dir: Path, tmp_path: Path) -> None:
+        """Short speech segments raise InsufficientAudioError."""
+        audio_path = _make_audio(fixtures_dir / "short.wav", duration=5.0)
+        storage = tmp_path / "storage"
+
+        # Only 1 second of speech — well under 3s minimum
+        short_segments = [SpeakerSegment(0.0, 1.0, "SPEAKER_00")]
+
+        with _error_profile_context(audio_path, storage, diarize_return=short_segments):
+            with pytest.raises(InsufficientAudioError) as exc_info:
+                build_speaker_profile(audio_path, "job-short")
+
+        assert exc_info.value.error_code == "insufficient_audio"
+        assert "At least 3 seconds" in exc_info.value.user_message
+        assert exc_info.value.stage == "segment_selection"
+
+    def test_corrupt_file_raises_audio_corrupt(self, fixtures_dir: Path, tmp_path: Path) -> None:
+        """Unreadable file raises AudioCorruptError."""
+        corrupt_path = fixtures_dir / "corrupt.wav"
+        corrupt_path.write_bytes(b"this is not audio data at all")
+
+        with pytest.raises(AudioCorruptError) as exc_info:
+            build_speaker_profile(corrupt_path, "job-corrupt")
+
+        assert exc_info.value.error_code == "audio_corrupt"
+        assert exc_info.value.stage == "input_validation"
+
+    def test_missing_file_raises_audio_corrupt(self, fixtures_dir: Path) -> None:
+        """Non-existent file raises AudioCorruptError (not FileNotFoundError)."""
+        with pytest.raises(AudioCorruptError) as exc_info:
+            build_speaker_profile(fixtures_dir / "missing.wav", "job-missing")
+
+        assert exc_info.value.error_code == "audio_corrupt"
+
+    def test_separation_failure_raises_processing_error(
+        self, fixtures_dir: Path, tmp_path: Path
+    ) -> None:
+        """Unexpected error in source separation raises ProcessingError."""
+        audio_path = _make_audio(fixtures_dir / "sepfail.wav", duration=5.0)
+        storage = tmp_path / "storage"
+
+        with _error_profile_context(
+            audio_path,
+            storage,
+            separate_side_effect=RuntimeError("GPU out of memory"),
+        ):
+            with pytest.raises(ProcessingError) as exc_info:
+                build_speaker_profile(audio_path, "job-sepfail")
+
+        assert exc_info.value.error_code == "processing_error"
+        assert exc_info.value.stage == "separation"
+        assert "Source separation failed" in str(exc_info.value)
+
+    def test_enhancement_failure_raises_processing_error(
+        self, fixtures_dir: Path, tmp_path: Path
+    ) -> None:
+        """Unexpected error in speech enhancement raises ProcessingError."""
+        audio_path = _make_audio(fixtures_dir / "enhfail.wav", duration=5.0)
+        storage = tmp_path / "storage"
+
+        with _error_profile_context(
+            audio_path,
+            storage,
+            enhance_side_effect=RuntimeError("Model loading failed"),
+        ):
+            with pytest.raises(ProcessingError) as exc_info:
+                build_speaker_profile(audio_path, "job-enhfail")
+
+        assert exc_info.value.error_code == "processing_error"
+        assert exc_info.value.stage == "enhancement"
+
+    def test_diarization_failure_raises_processing_error(
+        self, fixtures_dir: Path, tmp_path: Path
+    ) -> None:
+        """Unexpected error in diarization raises ProcessingError."""
+        audio_path = _make_audio(fixtures_dir / "diarfail.wav", duration=5.0)
+        storage = tmp_path / "storage"
+
+        with _error_profile_context(
+            audio_path,
+            storage,
+            diarize_side_effect=RuntimeError("Diarization model failed"),
+        ):
+            with pytest.raises(ProcessingError) as exc_info:
+                build_speaker_profile(audio_path, "job-diarfail")
+
+        assert exc_info.value.error_code == "processing_error"
+        assert exc_info.value.stage == "diarization"
+
+    def test_embedding_failure_raises_processing_error(
+        self, fixtures_dir: Path, tmp_path: Path
+    ) -> None:
+        """Unexpected error in embedding computation raises ProcessingError."""
+        audio_path = _make_audio(fixtures_dir / "embfail.wav", duration=20.0)
+        storage = tmp_path / "storage"
+
+        mock_ecapa = MagicMock()
+        mock_ecapa.encode_batch.return_value = torch.zeros(1, 1, 192)
+
+        stack = ExitStack()
+        stack.enter_context(patch(
+            "app.pipelines.preprocess.separate_vocals", return_value=audio_path,
+        ))
+        stack.enter_context(patch(
+            "app.pipelines.preprocess.enhance_speech", return_value=audio_path,
+        ))
+        stack.enter_context(patch(
+            "app.pipelines.diarize.diarize_speakers",
+            return_value=[
+                SpeakerSegment(0.0, 5.0, "SPEAKER_00"),
+                SpeakerSegment(5.0, 10.0, "SPEAKER_00"),
+                SpeakerSegment(10.0, 20.0, "SPEAKER_00"),
+            ],
+        ))
+        stack.enter_context(patch(
+            "app.pipelines.diarize.select_dominant_speaker",
+            return_value="SPEAKER_00",
+        ))
+        # Make _load_ecapa_model succeed, but encode_batch fail
+        failing_ecapa = MagicMock()
+        failing_ecapa.encode_batch.side_effect = RuntimeError("CUDA error")
+        stack.enter_context(patch(
+            "app.pipelines.analyze._load_ecapa_model", return_value=failing_ecapa,
+        ))
+        stack.enter_context(patch.object(settings, "storage_path", storage))
+
+        with stack:
+            with pytest.raises(ProcessingError) as exc_info:
+                build_speaker_profile(audio_path, "job-embfail")
+
+        assert exc_info.value.stage == "embedding"
+
+    def test_pipeline_error_passthrough_separation(
+        self, fixtures_dir: Path, tmp_path: Path
+    ) -> None:
+        """PipelineError raised in separation passes through unwrapped."""
+        audio_path = _make_audio(fixtures_dir / "pass_sep.wav", duration=5.0)
+        storage = tmp_path / "storage"
+
+        with _error_profile_context(
+            audio_path,
+            storage,
+            separate_side_effect=NoSpeechDetectedError(stage="separation"),
+        ):
+            with pytest.raises(NoSpeechDetectedError) as exc_info:
+                build_speaker_profile(audio_path, "job-pass-sep")
+
+        assert exc_info.value.stage == "separation"
+
+    def test_pipeline_error_passthrough_enhancement(
+        self, fixtures_dir: Path, tmp_path: Path
+    ) -> None:
+        """PipelineError raised in enhancement passes through unwrapped."""
+        audio_path = _make_audio(fixtures_dir / "pass_enh.wav", duration=5.0)
+        storage = tmp_path / "storage"
+
+        with _error_profile_context(
+            audio_path,
+            storage,
+            enhance_side_effect=AudioCorruptError(stage="enhancement"),
+        ):
+            with pytest.raises(AudioCorruptError) as exc_info:
+                build_speaker_profile(audio_path, "job-pass-enh")
+
+        assert exc_info.value.stage == "enhancement"
+
+    def test_pipeline_error_passthrough_diarization(
+        self, fixtures_dir: Path, tmp_path: Path
+    ) -> None:
+        """PipelineError raised in diarization passes through unwrapped."""
+        audio_path = _make_audio(fixtures_dir / "pass_diar.wav", duration=5.0)
+        storage = tmp_path / "storage"
+
+        with _error_profile_context(
+            audio_path,
+            storage,
+            diarize_side_effect=ProcessingError("OOM", stage="diarization"),
+        ):
+            with pytest.raises(ProcessingError) as exc_info:
+                build_speaker_profile(audio_path, "job-pass-diar")
+
+        assert exc_info.value.stage == "diarization"
+
+    def test_pipeline_error_passthrough_embedding(
+        self, fixtures_dir: Path, tmp_path: Path
+    ) -> None:
+        """PipelineError raised in embedding passes through unwrapped."""
+        audio_path = _make_audio(fixtures_dir / "pass_emb.wav", duration=20.0)
+        storage = tmp_path / "storage"
+
+        mock_ecapa = MagicMock()
+        mock_ecapa.encode_batch.return_value = torch.zeros(1, 1, 192)
+
+        stack = ExitStack()
+        stack.enter_context(patch(
+            "app.pipelines.preprocess.separate_vocals", return_value=audio_path,
+        ))
+        stack.enter_context(patch(
+            "app.pipelines.preprocess.enhance_speech", return_value=audio_path,
+        ))
+        stack.enter_context(patch(
+            "app.pipelines.diarize.diarize_speakers",
+            return_value=[
+                SpeakerSegment(0.0, 5.0, "SPEAKER_00"),
+                SpeakerSegment(5.0, 10.0, "SPEAKER_00"),
+                SpeakerSegment(10.0, 20.0, "SPEAKER_00"),
+            ],
+        ))
+        stack.enter_context(patch(
+            "app.pipelines.diarize.select_dominant_speaker",
+            return_value="SPEAKER_00",
+        ))
+        # Make _load_ecapa_model raise a PipelineError
+        stack.enter_context(patch(
+            "app.pipelines.analyze._load_ecapa_model",
+            side_effect=ProcessingError("Model load failed", stage="embedding"),
+        ))
+        stack.enter_context(patch.object(settings, "storage_path", storage))
+
+        with stack:
+            with pytest.raises(ProcessingError) as exc_info:
+                build_speaker_profile(audio_path, "job-pass-emb")
+
+        assert exc_info.value.stage == "embedding"

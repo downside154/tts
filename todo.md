@@ -333,13 +333,13 @@
 ---
 
 ### 2.8 — Error handling for analysis pipeline
-- [ ] Define typed error classes:
+- [x] Define typed error classes:
   - `NoSpeechDetectedError` — VAD found no speech
   - `InsufficientAudioError` — total speech < 3 seconds
   - `AudioCorruptError` — file cannot be decoded
   - `ProcessingError` — generic pipeline failure with stage info
-- [ ] Map all errors to API error responses with actionable user messages
-- [ ] Wire error codes into Job record on failure
+- [x] Map all errors to API error responses with actionable user messages
+- [x] Wire error codes into Job record on failure
 
 **Pass criteria:**
 - Silent audio → Job fails with `NoSpeechDetectedError`, message: "No speech detected in the uploaded file"
