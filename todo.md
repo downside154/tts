@@ -5,11 +5,11 @@
 ## Milestone 0: Project Scaffolding
 
 ### 0.0 — Set up Python 3.13 virtualenv with uv
-- [ ] Install `uv` if not already present (`curl -LsSf https://astral.sh/uv/install.sh | sh` or `brew install uv`)
-- [ ] Create virtualenv with Python 3.13: `uv venv --python 3.13`
-- [ ] Activate the virtualenv: `source .venv/bin/activate`
-- [ ] Verify Python version: `python --version` shows 3.13.x
-- [ ] Verify uv is managing the environment: `uv pip list` works
+- [x] Install `uv` if not already present (`curl -LsSf https://astral.sh/uv/install.sh | sh` or `brew install uv`)
+- [x] Create virtualenv with Python 3.13: `uv venv --python 3.13`
+- [x] Activate the virtualenv: `source .venv/bin/activate`
+- [x] Verify Python version: `python --version` shows 3.13.x
+- [x] Verify uv is managing the environment: `uv pip list` works
 
 **Pass criteria:**
 - `.venv/` directory exists at project root
@@ -20,14 +20,14 @@
 ---
 
 ### 0.1 — Initialize repository and project config
-- [ ] Create `pyproject.toml` with all dependencies listed in plan Section 11
+- [x] Create `pyproject.toml` with all dependencies listed in plan Section 11
   - Pin `requires-python = ">=3.13"`
   - Pin `fastapi==0.134.0`
   - Use `uv` as the package manager (configure `[tool.uv]` section if needed)
-- [ ] Configure linting (ruff), formatting (black), type-checking (ty)
-- [ ] Add `.gitignore` for Python, `.venv/`, audio files, model weights, `.env`, Docker volumes
-- [ ] Initialize git repo and make initial commit
-- [ ] Install all dependencies via `uv sync` or `uv pip install -e .`
+- [x] Configure linting (ruff), formatting (black), type-checking (ty)
+- [x] Add `.gitignore` for Python, `.venv/`, audio files, model weights, `.env`, Docker volumes
+- [x] Initialize git repo and make initial commit
+- [x] Install all dependencies via `uv sync` or `uv pip install -e .`
 
 **Pass criteria:**
 - `git status` shows clean working tree after initial commit
