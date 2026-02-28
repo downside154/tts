@@ -105,11 +105,11 @@
 ---
 
 ### 1.2 — Database models and migrations
-- [ ] Implement `app/models/db.py` with SQLAlchemy 2.0 models:
+- [x] Implement `app/models/db.py` with SQLAlchemy 2.0 models:
   - `Job` table: id, status (pending/processing/completed/failed), stage, progress, error_message, created_at, updated_at, input_file_path, speaker_profile_id
   - `SpeakerProfile` table: id, name, embedding_path, segments_json, metadata_json, created_at
   - `AudioOutput` table: id, job_id (nullable), speaker_profile_id, text_input, file_path, format, created_at
-- [ ] Set up Alembic for migrations (or use `create_all` for V1)
+- [x] Set up Alembic for migrations (or use `create_all` for V1)
 
 **Pass criteria:**
 - Tables are created in Postgres on startup
