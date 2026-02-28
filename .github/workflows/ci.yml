@@ -19,7 +19,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           version: "latest"
-      - run: uv sync --only-group lint --no-install-project
+      - run: uv sync --group lint --no-dev
       - name: Ruff lint
         run: uv run --no-sync ruff check .
       - name: Type check

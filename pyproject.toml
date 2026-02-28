@@ -7,6 +7,7 @@ dependencies = [
     # Core
     "torch>=2.0",
     "torchaudio>=2.0",
+    "torchcodec>=0.10.0",
     "fastapi==0.134.0",
     "uvicorn>=0.20",
     "celery>=5.3",
@@ -41,7 +42,6 @@ ml = [
     "g2pk>=0.9",
     "python-mecab-ko>=1.0",
     "jamo>=0.4",
-    "torchcodec>=0.10.0",
 ]
 dev = [
     { include-group = "lint" },
@@ -72,6 +72,13 @@ exclude_lines = [
     "if __name__ == .__main__.",
     "if TYPE_CHECKING:",
 ]
+
+[tool.ty.rules]
+# ML dependencies (demucs, deepfilternet, speechbrain, pyannote) are optional
+# and only installed via the [ml] dependency group. ty cannot resolve them in
+# lint-only CI environments, so downgrade to warnings.
+unresolved-import = "warn"
+unused-type-ignore-comment = "warn"
 
 [tool.ruff]
 target-version = "py313"
