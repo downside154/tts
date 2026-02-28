@@ -7,6 +7,7 @@ audio retrieval, and error handling.
 import io
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
+from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
@@ -50,8 +51,10 @@ def client():
 
     app.dependency_overrides[get_db] = _override_get_db
     app.router.lifespan_context = _noop_lifespan
-    with TestClient(app) as c:
-        yield c
+    with patch("app.workers.tasks.process_voice_clone") as mock_task:
+        mock_task.delay = lambda *a, **kw: None
+        with TestClient(app) as c:
+            yield c
     app.dependency_overrides.clear()
 
 

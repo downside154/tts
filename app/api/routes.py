@@ -51,6 +51,10 @@ async def clone_voice(file: UploadFile, db: Session = Depends(get_db)):
     db.add(job)
     db.commit()
 
+    from app.workers.tasks import process_voice_clone as _task
+
+    _task.delay(job_id)
+
     return CloneResponse(job_id=job_id, status=JobStatus.PENDING.value)
 
 

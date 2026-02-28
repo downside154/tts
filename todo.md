@@ -140,12 +140,12 @@
 ---
 
 ### 1.4 — Celery worker setup
-- [ ] Implement `app/workers/tasks.py` with Celery app configuration
-- [ ] Define `process_voice_clone` task that:
+- [x] Implement `app/workers/tasks.py` with Celery app configuration
+- [x] Define `process_voice_clone` task that:
   1. Updates job status to "processing"
   2. Calls ingest pipeline (Task 1.5)
   3. Updates job status to "completed" or "failed" with error details
-- [ ] Configure task routing, retries, and timeouts
+- [x] Configure task routing, retries, and timeouts
 
 **Pass criteria:**
 - Worker connects to Redis broker and starts without errors
