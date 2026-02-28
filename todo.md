@@ -77,9 +77,9 @@
 ---
 
 ### 0.3 — Set up configuration management
-- [ ] Implement `app/config.py` using `pydantic-settings`
-- [ ] Define settings: database URL, Redis URL, storage path, model paths, FFmpeg path, device (cpu/cuda/mps), debug flag
-- [ ] Support `.env` file loading and environment variable overrides
+- [x] Implement `app/config.py` using `pydantic-settings`
+- [x] Define settings: database URL, Redis URL, storage path, model paths, FFmpeg path, device (cpu/cuda/mps), debug flag
+- [x] Support `.env` file loading and environment variable overrides
 
 **Pass criteria:**
 - `from app.config import settings` works and returns typed config object
