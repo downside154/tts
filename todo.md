@@ -39,7 +39,7 @@
 ---
 
 ### 0.2 — Create directory structure
-- [ ] Create full directory tree matching plan Section 5:
+- [x] Create full directory tree matching plan Section 5:
   ```
   app/__init__.py
   app/main.py
@@ -67,7 +67,7 @@
   docker/Dockerfile
   docker/docker-compose.yml
   ```
-- [ ] Each Python file has a module docstring and placeholder imports
+- [x] Each Python file has a module docstring and placeholder imports
 
 **Pass criteria:**
 - All files exist at the correct paths

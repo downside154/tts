@@ -1,0 +1,2 @@
+# Docker Compose stack for Korean Voice Cloning TTS
+# Services: api, worker, redis, postgres
