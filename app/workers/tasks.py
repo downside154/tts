@@ -4,13 +4,16 @@ Defines the voice cloning processing task that orchestrates
 the full analysis pipeline as a background job.
 """
 
+import json
 import logging
 import traceback
+from pathlib import Path
 
 from celery import Celery
 
 from app.config import settings
-from app.models.db import Job, JobStatus, get_session_factory
+from app.models.db import Job, JobStatus, SpeakerProfile, get_session_factory
+from app.pipelines.analyze import build_speaker_profile
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +45,29 @@ def process_voice_clone(self, job_id: str) -> None:
             return
 
         job.status = JobStatus.PROCESSING
-        job.stage = "ingest"
+        job.stage = "analyzing"
         job.progress = 0.0
         db.commit()
 
-        # TODO: call ingest pipeline (Task 1.5)
-        # ingest.extract_audio(Path(job.input_file_path))
+        input_path = Path(job.input_file_path)  # type: ignore[arg-type]
+        profile_data = build_speaker_profile(input_path, job_id)
 
+        speaker_profile = SpeakerProfile(
+            id=profile_data["id"],
+            name=input_path.stem,
+            embedding_path=profile_data["embedding_path"],
+            segments_json=json.dumps(profile_data["segments"]),
+            metadata_json=json.dumps({
+                "source_file": profile_data["source_file"],
+                "speaker_count": profile_data["speaker_count"],
+                "dominant_speaker_id": profile_data["dominant_speaker_id"],
+                "quality_summary": profile_data["quality_summary"],
+                "total_duration_s": profile_data["total_duration_s"],
+            }),
+        )
+        db.add(speaker_profile)
+
+        job.speaker_profile_id = speaker_profile.id
         job.status = JobStatus.COMPLETED
         job.stage = "done"
         job.progress = 100.0

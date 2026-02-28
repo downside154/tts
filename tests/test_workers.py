@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models.db import Base, Job, JobStatus
+from app.models.db import Base, Job, JobStatus, SpeakerProfile
 
 _engine = create_engine(
     "sqlite:///:memory:",
@@ -92,6 +92,25 @@ def _make_always_fail_session_class():
     return AlwaysFailSession
 
 
+_MOCK_PROFILE = {
+    "id": "test-profile-id",
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "source_file": "test.wav",
+    "embedding_path": "/tmp/embedding.npy",
+    "segments": [{"path": "/tmp/seg.wav", "start": 0.0, "end": 5.0, "quality_score": 0.9}],
+    "total_duration_s": 15.0,
+    "speaker_count": 1,
+    "dominant_speaker_id": "SPEAKER_00",
+    "quality_summary": {"mean_snr": 25.0, "clipped_segments": 0},
+}
+
+
+@pytest.fixture(autouse=True)
+def _mock_profile_builder():
+    with patch("app.workers.tasks.build_speaker_profile", return_value=_MOCK_PROFILE):
+        yield
+
+
 @pytest.fixture
 def _mock_factory():
     with patch("app.workers.tasks.get_session_factory", return_value=_TestSession):
@@ -100,7 +119,7 @@ def _mock_factory():
 
 class TestProcessVoiceClone:
     def test_successful_completion(self, _mock_factory) -> None:
-        """Job transitions from pending to completed."""
+        """Job transitions from pending to completed with speaker profile."""
         from app.workers.tasks import process_voice_clone
 
         _create_job("job-success")
@@ -112,6 +131,12 @@ class TestProcessVoiceClone:
         assert job.status == JobStatus.COMPLETED
         assert job.stage == "done"
         assert job.progress == 100.0
+        assert job.speaker_profile_id == "test-profile-id"
+
+        profile = db.get(SpeakerProfile, "test-profile-id")
+        assert profile is not None
+        assert profile.name == "test"
+        assert profile.embedding_path == "/tmp/embedding.npy"
         db.close()
 
     def test_job_not_found(self, _mock_factory) -> None:

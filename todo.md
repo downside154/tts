@@ -287,7 +287,7 @@
 ---
 
 ### 2.6 — Speaker profile builder
-- [ ] Implement `build_speaker_profile(audio_path: Path, job_id: str) -> SpeakerProfile` in `app/pipelines/analyze.py`
+- [x] Implement `build_speaker_profile(audio_path: Path, job_id: str) -> SpeakerProfile` in `app/pipelines/analyze.py`
   - Orchestrate: noise detection → separation → enhancement → VAD → diarization → segment scoring → profile assembly
   - Generate speaker embedding (ECAPA-TDNN via SpeechBrain)
   - Save profile artifact: `speaker_profile.json` with schema:
@@ -306,8 +306,8 @@
       "quality_summary": {"mean_snr": 25.3, "clipped_segments": 0}
     }
     ```
-- [ ] Store profile in database (SpeakerProfile table)
-- [ ] Wire into Celery task from 1.4
+- [x] Store profile in database (SpeakerProfile table)
+- [x] Wire into Celery task from 1.4
 
 **Pass criteria:**
 - Upload video with one speaker → speaker profile created with valid embedding and segments

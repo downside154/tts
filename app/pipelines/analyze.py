@@ -4,14 +4,19 @@ Handles segment merging, quality scoring (SNR, clipping, duration),
 and speaker profile construction from processed audio segments.
 """
 
+import json
 import logging
 import math
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
 import soundfile as sf
+import torch
 
+from app.config import settings
 from app.pipelines.diarize import SpeakerSegment
 
 logger = logging.getLogger(__name__)
@@ -252,3 +257,253 @@ def _duration_score(duration: float) -> float:
         return duration / MIN_ACCEPTABLE_DURATION
     # duration > MAX_ACCEPTABLE_DURATION
     return max(0.0, 1.0 - (duration - MAX_ACCEPTABLE_DURATION) / MAX_ACCEPTABLE_DURATION)
+
+
+# ── Speaker embedding ─────────────────────────────────────────────
+
+ECAPA_MODEL_SOURCE = "speechbrain/spkrec-ecapa-voxceleb"
+ECAPA_SAMPLE_RATE = 16000
+
+_ecapa_model = None
+
+
+def _load_ecapa_model():
+    """Lazily load and cache the ECAPA-TDNN speaker encoder."""
+    global _ecapa_model
+    if _ecapa_model is None:
+        from app.pipelines.preprocess import _ensure_torchaudio_compat
+
+        _ensure_torchaudio_compat()
+
+        from speechbrain.inference.speaker import EncoderClassifier
+
+        savedir = settings.storage_path / "models" / "spkrec-ecapa-voxceleb"
+        logger.info("Loading ECAPA-TDNN model from %s...", ECAPA_MODEL_SOURCE)
+        _ecapa_model = EncoderClassifier.from_hparams(
+            source=ECAPA_MODEL_SOURCE,
+            savedir=str(savedir),
+        )
+        logger.info("ECAPA-TDNN model loaded")
+    return _ecapa_model
+
+
+def compute_speaker_embedding(
+    audio_path: Path,
+    segments: list[ScoredSegment],
+) -> np.ndarray:
+    """Compute a 192-dim speaker embedding from selected audio segments.
+
+    Concatenates the audio from the given segments and runs it through
+    the ECAPA-TDNN encoder.  Audio is resampled to 16 kHz if needed.
+
+    Args:
+        audio_path: Path to the full audio file.
+        segments: Selected scored segments to use for embedding.
+
+    Returns:
+        NumPy array of shape ``(192,)`` with the speaker embedding.
+
+    Raises:
+        FileNotFoundError: If the audio file does not exist.
+    """
+    audio_path = Path(audio_path)
+    if not audio_path.exists():
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+    data, sr = sf.read(str(audio_path), dtype="float32")
+    if data.ndim > 1:
+        data = data[:, 0]
+
+    chunks = []
+    for seg in segments:
+        start_idx = int(seg.start * sr)
+        end_idx = min(int(seg.end * sr), len(data))
+        chunks.append(data[start_idx:end_idx])
+
+    concatenated = np.concatenate(chunks)
+    signal = torch.tensor(concatenated).unsqueeze(0)  # (1, samples)
+
+    if sr != ECAPA_SAMPLE_RATE:
+        import torchaudio
+
+        signal = torchaudio.functional.resample(signal, sr, ECAPA_SAMPLE_RATE)
+
+    model = _load_ecapa_model()
+    with torch.no_grad():
+        embedding = model.encode_batch(signal)
+
+    return embedding.squeeze().cpu().numpy()
+
+
+# ── Speaker profile builder ───────────────────────────────────────
+
+
+def _compute_snr_db(chunk: np.ndarray) -> float:
+    """Compute SNR in decibels for an audio chunk.
+
+    Uses the same frame-based approach as ``_snr_proxy_score`` but
+    returns the raw dB value instead of a 0–1 score.
+    """
+    if len(chunk) == 0:
+        return 0.0
+
+    frame_size = 1024
+    frames = [
+        chunk[i : i + frame_size]
+        for i in range(0, len(chunk), frame_size)
+        if len(chunk[i : i + frame_size]) == frame_size
+    ]
+
+    if not frames:
+        return 0.0
+
+    energies = [float(np.mean(f**2)) for f in frames]
+    energies.sort()
+
+    n_quiet = max(1, len(energies) // 10)
+    noise_energy = sum(energies[:n_quiet]) / n_quiet
+    signal_energy = sum(energies) / len(energies)
+
+    if signal_energy < 1e-10 or noise_energy < 1e-10:
+        return 0.0
+
+    return 10.0 * math.log10(signal_energy / noise_energy)
+
+
+def _compute_quality_summary(
+    data: np.ndarray,
+    sr: int,
+    segments: list[ScoredSegment],
+) -> dict:
+    """Compute quality summary statistics for selected segments."""
+    snr_values: list[float] = []
+    clipped_count = 0
+
+    for seg in segments:
+        start_idx = int(seg.start * sr)
+        end_idx = min(int(seg.end * sr), len(data))
+        chunk = data[start_idx:end_idx]
+
+        snr_values.append(_compute_snr_db(chunk))
+
+        if np.any(np.abs(chunk) > CLIPPING_THRESHOLD):
+            clipped_count += 1
+
+    mean_snr = sum(snr_values) / len(snr_values) if snr_values else 0.0
+    return {
+        "mean_snr": round(mean_snr, 1),
+        "clipped_segments": clipped_count,
+    }
+
+
+def build_speaker_profile(audio_path: Path, job_id: str) -> dict:
+    """Build a complete speaker profile from an audio file.
+
+    Orchestrates the full analysis pipeline:
+    noise detection, source separation, speech enhancement,
+    diarization, segment scoring, embedding generation, and
+    profile assembly.
+
+    Args:
+        audio_path: Path to the input audio file.
+        job_id: Job identifier for organising output files.
+
+    Returns:
+        Dict matching the speaker-profile JSON schema, with keys:
+        ``id``, ``created_at``, ``source_file``, ``embedding_path``,
+        ``segments``, ``total_duration_s``, ``speaker_count``,
+        ``dominant_speaker_id``, ``quality_summary``.
+
+    Raises:
+        FileNotFoundError: If the audio file does not exist.
+    """
+    from app.pipelines.diarize import diarize_speakers, select_dominant_speaker
+    from app.pipelines.preprocess import enhance_speech, separate_vocals
+
+    audio_path = Path(audio_path)
+    if not audio_path.exists():
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+    # Create output directories
+    output_dir = settings.storage_path / job_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    segments_dir = output_dir / "segments"
+    segments_dir.mkdir(exist_ok=True)
+
+    # 1. Source separation (if needed)
+    processed_path = separate_vocals(audio_path)
+
+    # 2. Speech enhancement
+    processed_path = enhance_speech(processed_path)
+
+    # 3. Diarization
+    speaker_segments = diarize_speakers(processed_path)
+    speaker_count = len({s.speaker_id for s in speaker_segments})
+
+    # 4. Select dominant speaker and filter
+    dominant_id = select_dominant_speaker(speaker_segments)
+    dominant_segments = [
+        s for s in speaker_segments if s.speaker_id == dominant_id
+    ]
+
+    # 5. Merge segments
+    merged = merge_segments(dominant_segments)
+
+    # 6. Score segments
+    scored = [score_segment(processed_path, seg) for seg in merged]
+
+    # 7. Select best segments
+    selected = select_best_segments(scored)
+
+    # 8. Extract segment WAVs
+    data, sr = sf.read(str(processed_path), dtype="float32")
+    if data.ndim > 1:
+        data = data[:, 0]
+
+    segment_infos: list[dict] = []
+    for i, seg in enumerate(selected):
+        seg_path = segments_dir / f"segment_{i:03d}.wav"
+        start_idx = int(seg.start * sr)
+        end_idx = min(int(seg.end * sr), len(data))
+        sf.write(str(seg_path), data[start_idx:end_idx], sr, subtype="PCM_16")
+        segment_infos.append({
+            "path": str(seg_path),
+            "start": seg.start,
+            "end": seg.end,
+            "quality_score": seg.quality_score,
+        })
+
+    # 9. Compute speaker embedding
+    embedding = compute_speaker_embedding(processed_path, selected)
+    embedding_path = output_dir / "embedding.npy"
+    np.save(str(embedding_path), embedding)
+
+    # 10. Quality summary
+    quality_summary = _compute_quality_summary(data, sr, selected)
+
+    # 11. Assemble profile
+    total_duration = sum(s.end - s.start for s in selected)
+    profile = {
+        "id": str(uuid.uuid4()),
+        "created_at": datetime.now(UTC).isoformat(),
+        "source_file": audio_path.name,
+        "embedding_path": str(embedding_path),
+        "segments": segment_infos,
+        "total_duration_s": round(total_duration, 1),
+        "speaker_count": speaker_count,
+        "dominant_speaker_id": dominant_id,
+        "quality_summary": quality_summary,
+    }
+
+    # Save JSON
+    profile_path = output_dir / "speaker_profile.json"
+    with open(profile_path, "w") as f:
+        json.dump(profile, f, indent=2)
+
+    logger.info(
+        "Built speaker profile %s: %d segment(s), %.1fs total",
+        profile["id"],
+        len(selected),
+        total_duration,
+    )
+    return profile
