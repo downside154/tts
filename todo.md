@@ -267,15 +267,15 @@
 ---
 
 ### 2.5 — Segment merging and quality scoring
-- [ ] Implement segment merging in `app/pipelines/analyze.py`:
+- [x] Implement segment merging in `app/pipelines/analyze.py`:
   - Merge speaker segments into clips of 3-15 seconds, splitting at silence gaps
   - Respect speaker boundaries (don't merge across speakers)
-- [ ] Implement quality scoring:
+- [x] Implement quality scoring:
   - SNR proxy estimation per segment
   - Clipping detection (peak amplitude > 0.99)
   - Duration check (3-30s acceptable range)
   - Composite quality score (0.0 - 1.0)
-- [ ] Rank segments by quality score, select top N (enough for 10-30s total reference)
+- [x] Rank segments by quality score, select top N (enough for 10-30s total reference)
 
 **Pass criteria:**
 - Segments are between 3-15 seconds long
