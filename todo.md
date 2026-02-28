@@ -5,11 +5,11 @@
 ## Milestone 0: Project Scaffolding
 
 ### 0.0 — Set up Python 3.13 virtualenv with uv
-- [ ] Install `uv` if not already present (`curl -LsSf https://astral.sh/uv/install.sh | sh` or `brew install uv`)
-- [ ] Create virtualenv with Python 3.13: `uv venv --python 3.13`
-- [ ] Activate the virtualenv: `source .venv/bin/activate`
-- [ ] Verify Python version: `python --version` shows 3.13.x
-- [ ] Verify uv is managing the environment: `uv pip list` works
+- [x] Install `uv` if not already present (`curl -LsSf https://astral.sh/uv/install.sh | sh` or `brew install uv`)
+- [x] Create virtualenv with Python 3.13: `uv venv --python 3.13`
+- [x] Activate the virtualenv: `source .venv/bin/activate`
+- [x] Verify Python version: `python --version` shows 3.13.x
+- [x] Verify uv is managing the environment: `uv pip list` works
 
 **Pass criteria:**
 - `.venv/` directory exists at project root
@@ -20,14 +20,14 @@
 ---
 
 ### 0.1 — Initialize repository and project config
-- [ ] Create `pyproject.toml` with all dependencies listed in plan Section 11
+- [x] Create `pyproject.toml` with all dependencies listed in plan Section 11
   - Pin `requires-python = ">=3.13"`
   - Pin `fastapi==0.134.0`
   - Use `uv` as the package manager (configure `[tool.uv]` section if needed)
-- [ ] Configure linting (ruff), formatting (black), type-checking (ty)
-- [ ] Add `.gitignore` for Python, `.venv/`, audio files, model weights, `.env`, Docker volumes
-- [ ] Initialize git repo and make initial commit
-- [ ] Install all dependencies via `uv sync` or `uv pip install -e .`
+- [x] Configure linting (ruff), formatting (black), type-checking (ty)
+- [x] Add `.gitignore` for Python, `.venv/`, audio files, model weights, `.env`, Docker volumes
+- [x] Initialize git repo and make initial commit
+- [x] Install all dependencies via `uv sync` or `uv pip install -e .`
 
 **Pass criteria:**
 - `git status` shows clean working tree after initial commit
@@ -39,7 +39,7 @@
 ---
 
 ### 0.2 — Create directory structure
-- [ ] Create full directory tree matching plan Section 5:
+- [x] Create full directory tree matching plan Section 5:
   ```
   app/__init__.py
   app/main.py
@@ -67,7 +67,7 @@
   docker/Dockerfile
   docker/docker-compose.yml
   ```
-- [ ] Each Python file has a module docstring and placeholder imports
+- [x] Each Python file has a module docstring and placeholder imports
 
 **Pass criteria:**
 - All files exist at the correct paths
@@ -77,9 +77,9 @@
 ---
 
 ### 0.3 — Set up configuration management
-- [ ] Implement `app/config.py` using `pydantic-settings`
-- [ ] Define settings: database URL, Redis URL, storage path, model paths, FFmpeg path, device (cpu/cuda/mps), debug flag
-- [ ] Support `.env` file loading and environment variable overrides
+- [x] Implement `app/config.py` using `pydantic-settings`
+- [x] Define settings: database URL, Redis URL, storage path, model paths, FFmpeg path, device (cpu/cuda/mps), debug flag
+- [x] Support `.env` file loading and environment variable overrides
 
 **Pass criteria:**
 - `from app.config import settings` works and returns typed config object
@@ -91,10 +91,10 @@
 ## Milestone 1: Working Skeleton (Weeks 1-2)
 
 ### 1.1 — Docker Compose stack
-- [ ] Write `docker/Dockerfile` for the FastAPI app (Python 3.13, uv for dependency management, FFmpeg installed)
-- [ ] Write `docker/docker-compose.yml` with services: `api`, `worker`, `redis`, `postgres`
-- [ ] Add health check endpoints for each service
-- [ ] Configure volume mounts for local file storage and model cache
+- [x] Write `docker/Dockerfile` for the FastAPI app (Python 3.13, uv for dependency management, FFmpeg installed)
+- [x] Write `docker/docker-compose.yml` with services: `api`, `worker`, `redis`, `postgres`
+- [x] Add health check endpoints for each service
+- [x] Configure volume mounts for local file storage and model cache
 
 **Pass criteria:**
 - `docker compose up` boots all 4 services without errors
@@ -105,11 +105,11 @@
 ---
 
 ### 1.2 — Database models and migrations
-- [ ] Implement `app/models/db.py` with SQLAlchemy 2.0 models:
+- [x] Implement `app/models/db.py` with SQLAlchemy 2.0 models:
   - `Job` table: id, status (pending/processing/completed/failed), stage, progress, error_message, created_at, updated_at, input_file_path, speaker_profile_id
   - `SpeakerProfile` table: id, name, embedding_path, segments_json, metadata_json, created_at
   - `AudioOutput` table: id, job_id (nullable), speaker_profile_id, text_input, file_path, format, created_at
-- [ ] Set up Alembic for migrations (or use `create_all` for V1)
+- [x] Set up Alembic for migrations (or use `create_all` for V1)
 
 **Pass criteria:**
 - Tables are created in Postgres on startup
@@ -119,9 +119,9 @@
 ---
 
 ### 1.3 — FastAPI app skeleton with health and upload endpoints
-- [ ] Implement `app/main.py`: create FastAPI app, include router, configure CORS, lifespan events
-- [ ] Implement `app/api/schemas.py`: Pydantic models for all request/response shapes defined in plan Section 3 API Contract
-- [ ] Implement `app/api/routes.py` with endpoints:
+- [x] Implement `app/main.py`: create FastAPI app, include router, configure CORS, lifespan events
+- [x] Implement `app/api/schemas.py`: Pydantic models for all request/response shapes defined in plan Section 3 API Contract
+- [x] Implement `app/api/routes.py` with endpoints:
   - `POST /v1/voices/clone` — accept multipart file upload, validate file type (video/audio MIME types), create Job record, persist file to storage, enqueue Celery task, return `{job_id, status}`
   - `GET /v1/jobs/{job_id}` — return job status, stage, progress, errors, speaker_profile_id
   - `POST /v1/tts/synthesize` — stub (returns 501 for now)
@@ -140,12 +140,12 @@
 ---
 
 ### 1.4 — Celery worker setup
-- [ ] Implement `app/workers/tasks.py` with Celery app configuration
-- [ ] Define `process_voice_clone` task that:
+- [x] Implement `app/workers/tasks.py` with Celery app configuration
+- [x] Define `process_voice_clone` task that:
   1. Updates job status to "processing"
   2. Calls ingest pipeline (Task 1.5)
   3. Updates job status to "completed" or "failed" with error details
-- [ ] Configure task routing, retries, and timeouts
+- [x] Configure task routing, retries, and timeouts
 
 **Pass criteria:**
 - Worker connects to Redis broker and starts without errors
@@ -156,11 +156,11 @@
 ---
 
 ### 1.5 — FFmpeg audio extraction and normalization
-- [ ] Implement `app/pipelines/ingest.py`:
+- [x] Implement `app/pipelines/ingest.py`:
   - `extract_audio(input_path: Path) -> Path` — use FFmpeg to extract audio from any video/audio format → mono WAV, 24kHz, 16-bit PCM
   - Handle edge cases: already-WAV input, stereo→mono downmix, sample rate conversion
   - Validate output: file exists, non-zero size, correct format
-- [ ] Add FFmpeg subprocess error handling (missing codec, corrupt file, etc.)
+- [x] Add FFmpeg subprocess error handling (missing codec, corrupt file, etc.)
 
 **Pass criteria:**
 - MP4 video → mono WAV 24kHz 16-bit output
@@ -173,12 +173,12 @@
 ---
 
 ### 1.6 — Silero VAD segmentation
-- [ ] Implement VAD in `app/pipelines/preprocess.py`:
+- [x] Implement VAD in `app/pipelines/preprocess.py`:
   - `detect_speech_segments(audio_path: Path) -> list[Segment]` where `Segment = NamedTuple(start: float, end: float, confidence: float)`
   - Use Silero VAD with threshold=0.5, min_speech_duration=250ms
   - Merge adjacent segments with gaps < 300ms
   - Filter segments shorter than min_speech_duration
-- [ ] Handle edge case: no speech detected → return empty list with warning
+- [x] Handle edge case: no speech detected → return empty list with warning
 
 **Pass criteria:**
 - On a known test audio file with speech + silence, returns correct segment boundaries (within 100ms tolerance)
@@ -190,26 +190,28 @@
 ---
 
 ### 1.7 — CI pipeline
-- [ ] Set up GitHub Actions (or local pre-commit hooks) for:
+- [x] Set up GitHub Actions (or local pre-commit hooks) for:
   - Linting (ruff)
   - Type checking (ty)
   - Unit tests (pytest)
-- [ ] Ensure CI runs on every push/PR
+- [x] Ensure CI runs on every push/PR
+- [x] Added pytest-cov with 98% minimum coverage requirement
 
 **Pass criteria:**
 - `ruff check .` passes with zero errors
 - `ty app/` passes (or has explicit ignores documented)
 - `pytest tests/` passes all tests
 - CI pipeline runs and reports pass/fail status
+- Test coverage >= 98% (currently 100%)
 
 ---
 
 ## Milestone 2: Reference Analysis Pipeline (Weeks 3-4)
 
 ### 2.1 — Background noise detection
-- [ ] Implement `detect_needs_separation(audio_path: Path) -> bool` in `app/pipelines/preprocess.py`
-- [ ] Use SNR estimation or spectral analysis to determine if background music/noise is significant
-- [ ] Threshold: if estimated SNR < 20dB, flag for separation
+- [x] Implement `detect_needs_separation(audio_path: Path) -> bool` in `app/pipelines/preprocess.py`
+- [x] Use SNR estimation or spectral analysis to determine if background music/noise is significant
+- [x] Threshold: if estimated SNR < 20dB, flag for separation
 
 **Pass criteria:**
 - Clean speech recording → returns `False`
@@ -220,12 +222,12 @@
 ---
 
 ### 2.2 — Demucs source separation
-- [ ] Implement `separate_vocals(audio_path: Path) -> Path` in `app/pipelines/preprocess.py`
+- [x] Implement `separate_vocals(audio_path: Path) -> Path` in `app/pipelines/preprocess.py`
   - Use `htdemucs` model for vocal/music separation
   - Return path to isolated vocals track
   - Conditional: skip if `detect_needs_separation` returns False
-- [ ] Handle MPS/CUDA/CPU device selection from config
-- [ ] Manage model loading (lazy load, cache in memory)
+- [x] Handle MPS/CUDA/CPU device selection from config
+- [x] Manage model loading (lazy load, cache in memory)
 
 **Pass criteria:**
 - Audio with background music → vocals track with music significantly reduced
@@ -236,10 +238,10 @@
 ---
 
 ### 2.3 — DeepFilterNet speech enhancement
-- [ ] Implement `enhance_speech(audio_path: Path) -> Path` in `app/pipelines/preprocess.py`
+- [x] Implement `enhance_speech(audio_path: Path) -> Path` in `app/pipelines/preprocess.py`
   - Apply DeepFilterNet for residual noise removal
   - Preserve speech quality (no artifacts on clean speech)
-- [ ] Run after Demucs (if used) or directly on input (if clean)
+- [x] Run after Demucs (if used) or directly on input (if clean)
 
 **Pass criteria:**
 - Noisy speech → cleaner output with improved SNR
@@ -249,12 +251,12 @@
 ---
 
 ### 2.4 — Speaker diarization
-- [ ] Implement `app/pipelines/diarize.py`:
+- [x] Implement `app/pipelines/diarize.py`:
   - `diarize_speakers(audio_path: Path) -> list[SpeakerSegment]` where `SpeakerSegment` has start, end, speaker_id
   - Use pyannote.audio 3.1
   - Conditional: only run on audio with multiple detected speakers
-- [ ] Implement `detect_multi_speaker(audio_path: Path) -> bool` — quick check for speaker count
-- [ ] Implement `select_dominant_speaker(segments: list[SpeakerSegment]) -> str` — pick speaker with most total speech time
+- [x] Implement `detect_multi_speaker(audio_path: Path) -> bool` — quick check for speaker count
+- [x] Implement `select_dominant_speaker(segments: list[SpeakerSegment]) -> str` — pick speaker with most total speech time
 
 **Pass criteria:**
 - Single-speaker audio → returns all segments with same speaker_id
@@ -265,15 +267,15 @@
 ---
 
 ### 2.5 — Segment merging and quality scoring
-- [ ] Implement segment merging in `app/pipelines/analyze.py`:
+- [x] Implement segment merging in `app/pipelines/analyze.py`:
   - Merge speaker segments into clips of 3-15 seconds, splitting at silence gaps
   - Respect speaker boundaries (don't merge across speakers)
-- [ ] Implement quality scoring:
+- [x] Implement quality scoring:
   - SNR proxy estimation per segment
   - Clipping detection (peak amplitude > 0.99)
   - Duration check (3-30s acceptable range)
   - Composite quality score (0.0 - 1.0)
-- [ ] Rank segments by quality score, select top N (enough for 10-30s total reference)
+- [x] Rank segments by quality score, select top N (enough for 10-30s total reference)
 
 **Pass criteria:**
 - Segments are between 3-15 seconds long
@@ -285,7 +287,7 @@
 ---
 
 ### 2.6 — Speaker profile builder
-- [ ] Implement `build_speaker_profile(audio_path: Path, job_id: str) -> SpeakerProfile` in `app/pipelines/analyze.py`
+- [x] Implement `build_speaker_profile(audio_path: Path, job_id: str) -> SpeakerProfile` in `app/pipelines/analyze.py`
   - Orchestrate: noise detection → separation → enhancement → VAD → diarization → segment scoring → profile assembly
   - Generate speaker embedding (ECAPA-TDNN via SpeechBrain)
   - Save profile artifact: `speaker_profile.json` with schema:
@@ -304,8 +306,8 @@
       "quality_summary": {"mean_snr": 25.3, "clipped_segments": 0}
     }
     ```
-- [ ] Store profile in database (SpeakerProfile table)
-- [ ] Wire into Celery task from 1.4
+- [x] Store profile in database (SpeakerProfile table)
+- [x] Wire into Celery task from 1.4
 
 **Pass criteria:**
 - Upload video with one speaker → speaker profile created with valid embedding and segments
@@ -318,7 +320,7 @@
 ---
 
 ### 2.7 — EBU R128 loudness normalization
-- [ ] Implement `normalize_loudness(audio_path: Path, target_lufs: float = -23.0) -> Path` in `app/pipelines/preprocess.py`
+- [x] Implement `normalize_loudness(audio_path: Path, target_lufs: float = -23.0) -> Path` in `app/pipelines/preprocess.py`
   - Use `pyloudnorm` for EBU R128 loudness measurement and normalization
   - Apply to reference segments before building speaker profile
 
@@ -331,19 +333,39 @@
 ---
 
 ### 2.8 — Error handling for analysis pipeline
-- [ ] Define typed error classes:
+- [x] Define typed error classes:
   - `NoSpeechDetectedError` — VAD found no speech
   - `InsufficientAudioError` — total speech < 3 seconds
   - `AudioCorruptError` — file cannot be decoded
   - `ProcessingError` — generic pipeline failure with stage info
-- [ ] Map all errors to API error responses with actionable user messages
-- [ ] Wire error codes into Job record on failure
+- [x] Map all errors to API error responses with actionable user messages
+- [x] Wire error codes into Job record on failure
 
 **Pass criteria:**
 - Silent audio → Job fails with `NoSpeechDetectedError`, message: "No speech detected in the uploaded file"
 - 1-second audio clip → Job fails with `InsufficientAudioError`, message: "At least 3 seconds of speech required"
 - Corrupt file → Job fails with `AudioCorruptError`, descriptive message
 - `GET /v1/jobs/{job_id}` returns error code and user-friendly message
+
+---
+
+### 2.9 — Wrap-up and project hygiene
+- [ ] Create proper project documentation for completed Milestones 0-2:
+  - Update `README.md` with setup, run, test, and API usage instructions
+  - Add architecture/pipeline overview for ingest → preprocess → analyze flow
+  - Document known limitations and troubleshooting steps
+- [ ] Fix GitHub Actions so CI is working reliably:
+  - Diagnose current workflow failure(s)
+  - Update workflow config, commands, or environment setup as needed
+  - Verify lint/type/test jobs pass in CI
+- [ ] Do a final consistency sweep:
+  - Ensure `todo.md`, `plan.md`, and docs are aligned with actual implementation status
+  - Remove stale instructions and outdated pass criteria where applicable
+
+**Pass criteria:**
+- Project docs are complete enough for a new contributor to run the app and tests locally
+- GitHub Actions runs successfully on push/PR without manual intervention
+- No known broken CI checks remain for lint/type/test pipeline
 
 ---
 
