@@ -91,10 +91,10 @@
 ## Milestone 1: Working Skeleton (Weeks 1-2)
 
 ### 1.1 — Docker Compose stack
-- [ ] Write `docker/Dockerfile` for the FastAPI app (Python 3.13, uv for dependency management, FFmpeg installed)
-- [ ] Write `docker/docker-compose.yml` with services: `api`, `worker`, `redis`, `postgres`
-- [ ] Add health check endpoints for each service
-- [ ] Configure volume mounts for local file storage and model cache
+- [x] Write `docker/Dockerfile` for the FastAPI app (Python 3.13, uv for dependency management, FFmpeg installed)
+- [x] Write `docker/docker-compose.yml` with services: `api`, `worker`, `redis`, `postgres`
+- [x] Add health check endpoints for each service
+- [x] Configure volume mounts for local file storage and model cache
 
 **Pass criteria:**
 - `docker compose up` boots all 4 services without errors
