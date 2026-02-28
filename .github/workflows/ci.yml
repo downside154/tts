@@ -4,6 +4,9 @@ on:
   pull_request:
     branches: [main, develop]
 
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+
 jobs:
   lint_and_typecheck:
     name: lint and typecheck
@@ -18,12 +21,12 @@ jobs:
           version: "latest"
       - run: uv sync --only-group lint --no-install-project
       - name: Ruff lint
-        run: uv run --group lint ruff check .
+        run: uv run --no-sync ruff check .
       - name: Type check
-        run: uv run --group lint ty check app/
+        run: uv run --no-sync ty check app/
 
   test:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,8 +35,8 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           version: "latest"
-      - name: Install FFmpeg and MeCab
-        run: brew install ffmpeg mecab
-      - run: uv sync --group test
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: uv sync --group test --no-dev
       - name: Run tests with coverage
-        run: uv run --group test pytest tests/ -v --cov=app --cov-report=term-missing --cov-fail-under=98
+        run: uv run --no-sync pytest tests/ -v --cov=app --cov-report=term-missing --cov-fail-under=98

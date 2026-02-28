@@ -4,7 +4,6 @@ Covers VAD segmentation, noise detection, source separation,
 speech enhancement, and loudness normalization functionality.
 """
 
-import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -43,13 +42,30 @@ def _generate_silence(path: Path, duration: float = 2.0, sample_rate: int = 1600
     return path
 
 
+_FIXTURE_DIR = Path(__file__).parent / "fixtures"
+
+
 def _generate_speech(path: Path, text: str = "Hello, this is a test") -> Path:
-    """Generate speech audio using macOS say command."""
-    subprocess.run(
-        ["say", "-o", str(path), "--data-format=LEI16@16000", text],
-        capture_output=True,
-        check=True,
-    )
+    """Generate speech audio from a pre-recorded fixture.
+
+    Reads a real speech WAV fixture and adjusts its length based on
+    the text to produce audio that reliably triggers Silero VAD.
+    """
+    fixture = _FIXTURE_DIR / "speech_sample.wav"
+    data, sample_rate = sf.read(str(fixture), dtype="float32")
+
+    # Scale duration by word count (~0.3s per word, minimum 1s)
+    words = len(text.split())
+    target_samples = int(sample_rate * max(1.0, words * 0.3))
+
+    if len(data) >= target_samples:
+        data = data[:target_samples]
+    else:
+        # Repeat the fixture to reach target length
+        repeats = (target_samples // len(data)) + 1
+        data = np.tile(data, repeats)[:target_samples]
+
+    sf.write(str(path), data, sample_rate, subtype="PCM_16")
     return path
 
 
@@ -784,18 +800,18 @@ class TestEnhanceSpeech:
                 delattr(ta, "AudioMetaData")
 
             _ensure_torchaudio_compat()
-            first_cls = ta.AudioMetaData
+            first_cls = ta.AudioMetaData  # type: ignore[unresolved-attribute]
             first_module = sys.modules["torchaudio.backend"]
 
             _ensure_torchaudio_compat()
-            assert ta.AudioMetaData is first_cls
+            assert ta.AudioMetaData is first_cls  # type: ignore[unresolved-attribute]
             assert sys.modules["torchaudio.backend"] is first_module
         finally:
             for key in ["torchaudio.backend", "torchaudio.backend.common"]:
                 sys.modules.pop(key, None)
             sys.modules.update(saved_mods)
             if saved_meta is not None:
-                ta.AudioMetaData = saved_meta
+                ta.AudioMetaData = saved_meta  # type: ignore[unresolved-attribute]
 
 
 def _generate_tone_at_loudness(

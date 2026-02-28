@@ -13,24 +13,12 @@ dependencies = [
     "redis>=5.0",
     "pydantic-settings>=2.0",
     # Audio Processing
-    "demucs>=4.0",
-    "deepfilternet>=0.5",
     "pyloudnorm>=0.1",
-    "soxr>=0.3",
     "soundfile>=0.12",
-    # Speech Processing
-    "pyannote-audio>=3.1",
-    "faster-whisper>=1.0",
-    "speechbrain>=1.0",
-    # Korean NLP
-    "g2pk>=0.9",
-    "python-mecab-ko>=1.0",
-    "jamo>=0.4",
     # Storage
     "sqlalchemy>=2.0",
     "psycopg2-binary>=2.9",
     "python-multipart>=0.0.22",
-    "torchcodec>=0.10.0",
 ]
 
 [dependency-groups]
@@ -43,9 +31,22 @@ test = [
     "pytest-cov>=6.0",
     "httpx>=0.24",
 ]
+ml = [
+    "demucs>=4.0",
+    "deepfilternet>=0.5",
+    "soxr>=0.3",
+    "pyannote-audio>=3.1",
+    "faster-whisper>=1.0",
+    "speechbrain>=1.0",
+    "g2pk>=0.9",
+    "python-mecab-ko>=1.0",
+    "jamo>=0.4",
+    "torchcodec>=0.10.0",
+]
 dev = [
     { include-group = "lint" },
     { include-group = "test" },
+    { include-group = "ml" },
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -57,6 +58,7 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 addopts = "--cov=app --cov-report=term-missing --cov-fail-under=98"
+cache_dir = "/tmp/pytest_cache"
 
 [tool.coverage.run]
 source = ["app"]
@@ -74,6 +76,7 @@ exclude_lines = [
 [tool.ruff]
 target-version = "py313"
 line-length = 120
+cache-dir = "/tmp/ruff_cache"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "SIM"]

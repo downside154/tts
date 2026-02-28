@@ -134,6 +134,7 @@ class TestProcessVoiceClone:
 
         db = _TestSession()
         job = db.get(Job, "job-success")
+        assert job is not None
         assert job.status == JobStatus.COMPLETED
         assert job.stage == "done"
         assert job.progress == 100.0
@@ -161,6 +162,7 @@ class TestProcessVoiceClone:
 
         db = _TestSession()
         job = db.get(Job, "job-stage")
+        assert job is not None
         assert job.status == JobStatus.COMPLETED
         assert job.stage == "done"
         assert job.progress == 100.0
@@ -184,7 +186,9 @@ class TestProcessVoiceClone:
 
         db = _TestSession()
         job = db.get(Job, "job-fail")
+        assert job is not None
         assert job.status == JobStatus.FAILED
+        assert job.error_message is not None
         assert "RuntimeError" in job.error_message
         db.close()
 
@@ -247,6 +251,7 @@ class TestProcessVoiceClone:
 
         db = _TestSession()
         job = db.get(Job, "job-nospeech")
+        assert job is not None
         assert job.status == JobStatus.FAILED
         assert job.error_code == "no_speech"
         assert job.error_message == "No speech detected in the uploaded file"
@@ -270,6 +275,7 @@ class TestProcessVoiceClone:
 
         db = _TestSession()
         job = db.get(Job, "job-short")
+        assert job is not None
         assert job.status == JobStatus.FAILED
         assert job.error_code == "insufficient_audio"
         assert job.error_message == "At least 3 seconds of speech required"
@@ -293,6 +299,7 @@ class TestProcessVoiceClone:
 
         db = _TestSession()
         job = db.get(Job, "job-corrupt")
+        assert job is not None
         assert job.status == JobStatus.FAILED
         assert job.error_code == "audio_corrupt"
         assert job.error_message == "The audio file is corrupt or in an unsupported format"
@@ -317,6 +324,7 @@ class TestProcessVoiceClone:
 
         db = _TestSession()
         job = db.get(Job, "job-procerr")
+        assert job is not None
         assert job.status == JobStatus.FAILED
         assert job.error_code == "processing_error"
         assert job.error_message == "An error occurred during processing"
@@ -340,8 +348,10 @@ class TestProcessVoiceClone:
 
         db = _TestSession()
         job = db.get(Job, "job-generic")
+        assert job is not None
         assert job.status == JobStatus.FAILED
         assert job.error_code == "processing_error"
+        assert job.error_message is not None
         assert "RuntimeError" in job.error_message
         assert "Unexpected crash" in job.error_message
         db.close()

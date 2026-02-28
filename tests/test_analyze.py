@@ -793,9 +793,11 @@ class TestBuildSpeakerProfileErrors:
         audio_path = _make_audio(fixtures_dir / "silent.wav", duration=3.0)
         storage = tmp_path / "storage"
 
-        with _error_profile_context(audio_path, storage, diarize_return=[]):
-            with pytest.raises(NoSpeechDetectedError) as exc_info:
-                build_speaker_profile(audio_path, "job-nospeech")
+        with (
+            _error_profile_context(audio_path, storage, diarize_return=[]),
+            pytest.raises(NoSpeechDetectedError) as exc_info,
+        ):
+            build_speaker_profile(audio_path, "job-nospeech")
 
         assert exc_info.value.error_code == "no_speech"
         assert exc_info.value.user_message == "No speech detected in the uploaded file"
@@ -809,9 +811,11 @@ class TestBuildSpeakerProfileErrors:
         # Only 1 second of speech — well under 3s minimum
         short_segments = [SpeakerSegment(0.0, 1.0, "SPEAKER_00")]
 
-        with _error_profile_context(audio_path, storage, diarize_return=short_segments):
-            with pytest.raises(InsufficientAudioError) as exc_info:
-                build_speaker_profile(audio_path, "job-short")
+        with (
+            _error_profile_context(audio_path, storage, diarize_return=short_segments),
+            pytest.raises(InsufficientAudioError) as exc_info,
+        ):
+            build_speaker_profile(audio_path, "job-short")
 
         assert exc_info.value.error_code == "insufficient_audio"
         assert "At least 3 seconds" in exc_info.value.user_message
@@ -846,9 +850,8 @@ class TestBuildSpeakerProfileErrors:
             audio_path,
             storage,
             separate_side_effect=RuntimeError("GPU out of memory"),
-        ):
-            with pytest.raises(ProcessingError) as exc_info:
-                build_speaker_profile(audio_path, "job-sepfail")
+        ), pytest.raises(ProcessingError) as exc_info:
+            build_speaker_profile(audio_path, "job-sepfail")
 
         assert exc_info.value.error_code == "processing_error"
         assert exc_info.value.stage == "separation"
@@ -865,9 +868,8 @@ class TestBuildSpeakerProfileErrors:
             audio_path,
             storage,
             enhance_side_effect=RuntimeError("Model loading failed"),
-        ):
-            with pytest.raises(ProcessingError) as exc_info:
-                build_speaker_profile(audio_path, "job-enhfail")
+        ), pytest.raises(ProcessingError) as exc_info:
+            build_speaker_profile(audio_path, "job-enhfail")
 
         assert exc_info.value.error_code == "processing_error"
         assert exc_info.value.stage == "enhancement"
@@ -883,9 +885,8 @@ class TestBuildSpeakerProfileErrors:
             audio_path,
             storage,
             diarize_side_effect=RuntimeError("Diarization model failed"),
-        ):
-            with pytest.raises(ProcessingError) as exc_info:
-                build_speaker_profile(audio_path, "job-diarfail")
+        ), pytest.raises(ProcessingError) as exc_info:
+            build_speaker_profile(audio_path, "job-diarfail")
 
         assert exc_info.value.error_code == "processing_error"
         assert exc_info.value.stage == "diarization"
@@ -927,9 +928,8 @@ class TestBuildSpeakerProfileErrors:
         ))
         stack.enter_context(patch.object(settings, "storage_path", storage))
 
-        with stack:
-            with pytest.raises(ProcessingError) as exc_info:
-                build_speaker_profile(audio_path, "job-embfail")
+        with stack, pytest.raises(ProcessingError) as exc_info:
+            build_speaker_profile(audio_path, "job-embfail")
 
         assert exc_info.value.stage == "embedding"
 
@@ -944,9 +944,8 @@ class TestBuildSpeakerProfileErrors:
             audio_path,
             storage,
             separate_side_effect=NoSpeechDetectedError(stage="separation"),
-        ):
-            with pytest.raises(NoSpeechDetectedError) as exc_info:
-                build_speaker_profile(audio_path, "job-pass-sep")
+        ), pytest.raises(NoSpeechDetectedError) as exc_info:
+            build_speaker_profile(audio_path, "job-pass-sep")
 
         assert exc_info.value.stage == "separation"
 
@@ -961,9 +960,8 @@ class TestBuildSpeakerProfileErrors:
             audio_path,
             storage,
             enhance_side_effect=AudioCorruptError(stage="enhancement"),
-        ):
-            with pytest.raises(AudioCorruptError) as exc_info:
-                build_speaker_profile(audio_path, "job-pass-enh")
+        ), pytest.raises(AudioCorruptError) as exc_info:
+            build_speaker_profile(audio_path, "job-pass-enh")
 
         assert exc_info.value.stage == "enhancement"
 
@@ -978,9 +976,8 @@ class TestBuildSpeakerProfileErrors:
             audio_path,
             storage,
             diarize_side_effect=ProcessingError("OOM", stage="diarization"),
-        ):
-            with pytest.raises(ProcessingError) as exc_info:
-                build_speaker_profile(audio_path, "job-pass-diar")
+        ), pytest.raises(ProcessingError) as exc_info:
+            build_speaker_profile(audio_path, "job-pass-diar")
 
         assert exc_info.value.stage == "diarization"
 
@@ -1020,8 +1017,7 @@ class TestBuildSpeakerProfileErrors:
         ))
         stack.enter_context(patch.object(settings, "storage_path", storage))
 
-        with stack:
-            with pytest.raises(ProcessingError) as exc_info:
-                build_speaker_profile(audio_path, "job-pass-emb")
+        with stack, pytest.raises(ProcessingError) as exc_info:
+            build_speaker_profile(audio_path, "job-pass-emb")
 
         assert exc_info.value.stage == "embedding"
