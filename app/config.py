@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     # FFmpeg
     ffmpeg_path: str = "ffmpeg"
 
+    # HuggingFace (for gated models like pyannote)
+    hf_token: str = ""
+
     # Device
     device: DeviceType = DeviceType.MPS
 

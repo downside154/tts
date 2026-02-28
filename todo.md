@@ -251,12 +251,12 @@
 ---
 
 ### 2.4 — Speaker diarization
-- [ ] Implement `app/pipelines/diarize.py`:
+- [x] Implement `app/pipelines/diarize.py`:
   - `diarize_speakers(audio_path: Path) -> list[SpeakerSegment]` where `SpeakerSegment` has start, end, speaker_id
   - Use pyannote.audio 3.1
   - Conditional: only run on audio with multiple detected speakers
-- [ ] Implement `detect_multi_speaker(audio_path: Path) -> bool` — quick check for speaker count
-- [ ] Implement `select_dominant_speaker(segments: list[SpeakerSegment]) -> str` — pick speaker with most total speech time
+- [x] Implement `detect_multi_speaker(audio_path: Path) -> bool` — quick check for speaker count
+- [x] Implement `select_dominant_speaker(segments: list[SpeakerSegment]) -> str` — pick speaker with most total speech time
 
 **Pass criteria:**
 - Single-speaker audio → returns all segments with same speaker_id

@@ -16,7 +16,7 @@ from app.pipelines.preprocess import (
     DEEPFILTER_SAMPLE_RATE,
     DEMUCS_SAMPLE_RATE,
     Segment,
-    _ensure_deepfilter_compat,
+    _ensure_torchaudio_compat,
     detect_needs_separation,
     detect_speech_segments,
     enhance_speech,
@@ -24,7 +24,7 @@ from app.pipelines.preprocess import (
 )
 
 # Install torchaudio.backend shim so df.enhance can be imported in tests
-_ensure_deepfilter_compat()
+_ensure_torchaudio_compat()
 
 
 @pytest.fixture
@@ -701,7 +701,7 @@ class TestEnhanceSpeech:
             mock_init = MagicMock(return_value=(MagicMock(), MagicMock(), "suffix"))
 
             with (
-                patch("app.pipelines.preprocess._ensure_deepfilter_compat"),
+                patch("app.pipelines.preprocess._ensure_torchaudio_compat"),
                 patch("df.enhance.init_df", mock_init),
             ):
                 result1 = preprocess_mod._load_deepfilter_model()
@@ -713,46 +713,84 @@ class TestEnhanceSpeech:
             preprocess_mod._deepfilter_model = orig_model
             preprocess_mod._deepfilter_state = orig_state
 
-    def test_ensure_deepfilter_compat_shim(self) -> None:
-        """_ensure_deepfilter_compat installs torchaudio.backend shim."""
+    def test_ensure_torchaudio_compat_shim(self, fixtures_dir: Path) -> None:
+        """_ensure_torchaudio_compat installs all torchaudio shims."""
         import sys
 
-        from app.pipelines.preprocess import _ensure_deepfilter_compat
+        import torchaudio as ta
 
-        # Save and remove existing shim if present
-        saved = {}
+        from app.pipelines.preprocess import _ensure_torchaudio_compat
+
+        # Save and remove existing shim attributes
+        saved_attrs = {}
+        for attr in ("AudioMetaData", "info", "list_audio_backends"):
+            if hasattr(ta, attr):
+                saved_attrs[attr] = getattr(ta, attr)
+                delattr(ta, attr)
+
+        saved_mods = {}
         for key in ["torchaudio.backend", "torchaudio.backend.common"]:
             if key in sys.modules:
-                saved[key] = sys.modules.pop(key)
+                saved_mods[key] = sys.modules.pop(key)
 
         try:
-            _ensure_deepfilter_compat()
+            _ensure_torchaudio_compat()
+            assert hasattr(ta, "AudioMetaData")
+            assert hasattr(ta, "info")
+            assert hasattr(ta, "list_audio_backends")
             assert "torchaudio.backend" in sys.modules
-            assert "torchaudio.backend.common" in sys.modules
-            assert hasattr(sys.modules["torchaudio.backend.common"], "AudioMetaData")
+
+            # Verify info shim works with a real file
+            audio_path = fixtures_dir / "compat_test.wav"
+            samples = np.zeros(16000, dtype=np.float32)
+            sf.write(str(audio_path), samples, 16000, subtype="PCM_16")
+            meta = ta.info(str(audio_path))
+            assert meta.sample_rate == 16000
+            assert meta.num_channels == 1
+            assert meta.bits_per_sample == 16
+
+            # Verify list_audio_backends shim
+            assert ta.list_audio_backends() == ["soundfile"]
         finally:
-            # Restore original state
+            for attr in ("AudioMetaData", "info", "list_audio_backends"):
+                if hasattr(ta, attr):
+                    delattr(ta, attr)
+            for attr, val in saved_attrs.items():
+                setattr(ta, attr, val)
             for key in ["torchaudio.backend", "torchaudio.backend.common"]:
                 sys.modules.pop(key, None)
-            sys.modules.update(saved)
+            sys.modules.update(saved_mods)
 
-    def test_ensure_deepfilter_compat_idempotent(self) -> None:
-        """Calling _ensure_deepfilter_compat twice doesn't overwrite shim."""
+    def test_ensure_torchaudio_compat_idempotent(self) -> None:
+        """Calling _ensure_torchaudio_compat twice doesn't overwrite shim."""
         import sys
 
-        from app.pipelines.preprocess import _ensure_deepfilter_compat
+        import torchaudio as ta
 
-        saved = {}
+        from app.pipelines.preprocess import _ensure_torchaudio_compat
+
+        saved_mods = {}
         for key in ["torchaudio.backend", "torchaudio.backend.common"]:
             if key in sys.modules:
-                saved[key] = sys.modules.pop(key)
+                saved_mods[key] = sys.modules.pop(key)
+
+        saved_meta = getattr(ta, "AudioMetaData", None)
 
         try:
-            _ensure_deepfilter_compat()
+            # Remove so the shim installs fresh
+            if hasattr(ta, "AudioMetaData"):
+                delattr(ta, "AudioMetaData")
+
+            _ensure_torchaudio_compat()
+            first_cls = ta.AudioMetaData
             first_module = sys.modules["torchaudio.backend"]
-            _ensure_deepfilter_compat()
+
+            _ensure_torchaudio_compat()
+            assert ta.AudioMetaData is first_cls
             assert sys.modules["torchaudio.backend"] is first_module
         finally:
             for key in ["torchaudio.backend", "torchaudio.backend.common"]:
                 sys.modules.pop(key, None)
-            sys.modules.update(saved)
+            sys.modules.update(saved_mods)
+            if saved_meta is not None:
+                ta.AudioMetaData = saved_meta

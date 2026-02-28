@@ -139,30 +139,69 @@ def separate_vocals(audio_path: Path) -> Path:
     return output_path
 
 
-def _ensure_deepfilter_compat():
-    """Install torchaudio.backend shim for DeepFilterNet compatibility.
+def _ensure_torchaudio_compat():
+    """Patch torchaudio for compatibility with DeepFilterNet and pyannote.
 
-    DeepFilterNet's df.io imports torchaudio.backend.common.AudioMetaData
-    which was removed in torchaudio >= 2.6. This shim provides a stub
-    so the import chain doesn't break.
+    torchaudio >= 2.6 removed ``torchaudio.AudioMetaData``,
+    ``torchaudio.info``, ``torchaudio.list_audio_backends``, and the
+    ``torchaudio.backend`` sub-package. Both DeepFilterNet and
+    pyannote-audio depend on these removed APIs.  This function
+    installs lightweight stubs so the import chain doesn't break.
     """
     import sys
     import types
 
+    if not hasattr(torchaudio, "AudioMetaData"):
+
+        class _AudioMetaData:
+            __slots__ = (
+                "sample_rate", "num_frames", "num_channels",
+                "bits_per_sample", "encoding",
+            )
+
+            def __init__(self, sample_rate=0, num_frames=0, num_channels=0,
+                         bits_per_sample=0, encoding=""):
+                self.sample_rate = sample_rate
+                self.num_frames = num_frames
+                self.num_channels = num_channels
+                self.bits_per_sample = bits_per_sample
+                self.encoding = encoding
+
+        torchaudio.AudioMetaData = _AudioMetaData  # type: ignore[attr-defined]
+
+    if not hasattr(torchaudio, "info"):
+
+        def _info(file_path, backend=None):  # noqa: ARG001
+            info = sf.info(str(file_path))
+            _bits = {"PCM_16": 16, "PCM_24": 24, "PCM_32": 32,
+                     "FLOAT": 32, "DOUBLE": 64}
+            return torchaudio.AudioMetaData(  # type: ignore[attr-defined]
+                sample_rate=info.samplerate,
+                num_frames=info.frames,
+                num_channels=info.channels,
+                bits_per_sample=_bits.get(info.subtype, 16),
+                encoding=info.subtype,
+            )
+
+        torchaudio.info = _info  # type: ignore[attr-defined]
+
+    if not hasattr(torchaudio, "list_audio_backends"):
+        torchaudio.list_audio_backends = lambda: ["soundfile"]  # type: ignore[attr-defined]
+
     if "torchaudio.backend" not in sys.modules:
-        backend = types.ModuleType("torchaudio.backend")
-        common = types.ModuleType("torchaudio.backend.common")
-        common.AudioMetaData = type("AudioMetaData", (), {})  # type: ignore[attr-defined]
-        backend.common = common  # type: ignore[attr-defined]
-        sys.modules["torchaudio.backend"] = backend
-        sys.modules["torchaudio.backend.common"] = common
+        backend_mod = types.ModuleType("torchaudio.backend")
+        common_mod = types.ModuleType("torchaudio.backend.common")
+        common_mod.AudioMetaData = torchaudio.AudioMetaData  # type: ignore[attr-defined]
+        backend_mod.common = common_mod  # type: ignore[attr-defined]
+        sys.modules["torchaudio.backend"] = backend_mod
+        sys.modules["torchaudio.backend.common"] = common_mod
 
 
 def _load_deepfilter_model():
     """Lazily load and cache the DeepFilterNet model."""
     global _deepfilter_model, _deepfilter_state
     if _deepfilter_model is None:
-        _ensure_deepfilter_compat()
+        _ensure_torchaudio_compat()
         from df.enhance import init_df
 
         logger.info("Loading DeepFilterNet model...")
@@ -192,7 +231,7 @@ def enhance_speech(audio_path: Path) -> Path:
     if not audio_path.exists():
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
-    _ensure_deepfilter_compat()
+    _ensure_torchaudio_compat()
     from df.enhance import enhance
 
     model, df_state = _load_deepfilter_model()
