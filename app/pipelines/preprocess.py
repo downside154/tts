@@ -6,9 +6,12 @@ and loudness normalization (EBU R128).
 """
 
 import logging
+import math
 from pathlib import Path
 from typing import NamedTuple
 
+import numpy as np
+import soundfile as sf
 import torch
 
 logger = logging.getLogger(__name__)
@@ -17,6 +20,7 @@ SILERO_SAMPLE_RATE = 16000
 VAD_THRESHOLD = 0.5
 MIN_SPEECH_DURATION_MS = 250
 MERGE_GAP_MS = 300
+SNR_THRESHOLD_DB = 20.0
 
 
 class Segment(NamedTuple):
@@ -102,6 +106,69 @@ def detect_speech_segments(audio_path: Path) -> list[Segment]:
         sum(s.end - s.start for s in segments),
     )
     return segments
+
+
+def detect_needs_separation(audio_path: Path) -> bool:
+    """Determine if audio needs source separation based on SNR estimation.
+
+    Uses VAD to identify speech vs. non-speech regions, then computes
+    the signal-to-noise ratio. If estimated SNR < 20dB, the audio
+    likely has significant background noise or music and needs separation.
+
+    Args:
+        audio_path: Path to the input audio file.
+
+    Returns:
+        True if the audio needs source separation (SNR < 20dB),
+        False if the audio is clean enough to use directly.
+
+    Raises:
+        FileNotFoundError: If the audio file does not exist.
+    """
+    audio_path = Path(audio_path)
+    if not audio_path.exists():
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+    segments = detect_speech_segments(audio_path)
+
+    if not segments:
+        logger.info("No speech detected in %s — flagging for separation", audio_path.name)
+        return True
+
+    data, sample_rate = sf.read(str(audio_path), dtype="float32")
+    if data.ndim > 1:
+        data = data[:, 0]
+
+    total_samples = len(data)
+    speech_mask = np.zeros(total_samples, dtype=bool)
+    for seg in segments:
+        start_idx = int(seg.start * sample_rate)
+        end_idx = min(int(seg.end * sample_rate), total_samples)
+        speech_mask[start_idx:end_idx] = True
+
+    speech_samples = data[speech_mask]
+    noise_samples = data[~speech_mask]
+
+    if len(noise_samples) == 0:
+        logger.info("No non-speech regions in %s — assuming clean", audio_path.name)
+        return False
+
+    signal_power = float(np.mean(speech_samples**2))
+    noise_power = float(np.mean(noise_samples**2))
+
+    if noise_power < 1e-10:
+        logger.info("Noise floor near zero in %s — clean audio", audio_path.name)
+        return False
+
+    if signal_power < 1e-10:
+        logger.info("Signal power near zero in %s — flagging for separation", audio_path.name)
+        return True
+
+    snr_db = 10.0 * math.log10(signal_power / noise_power)
+
+    logger.info("Estimated SNR for %s: %.1f dB (threshold: %.1f dB)", audio_path.name, snr_db, SNR_THRESHOLD_DB)
+
+    return snr_db < SNR_THRESHOLD_DB
 
 
 def _compute_segment_confidence(

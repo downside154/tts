@@ -209,9 +209,9 @@
 ## Milestone 2: Reference Analysis Pipeline (Weeks 3-4)
 
 ### 2.1 — Background noise detection
-- [ ] Implement `detect_needs_separation(audio_path: Path) -> bool` in `app/pipelines/preprocess.py`
-- [ ] Use SNR estimation or spectral analysis to determine if background music/noise is significant
-- [ ] Threshold: if estimated SNR < 20dB, flag for separation
+- [x] Implement `detect_needs_separation(audio_path: Path) -> bool` in `app/pipelines/preprocess.py`
+- [x] Use SNR estimation or spectral analysis to determine if background music/noise is significant
+- [x] Threshold: if estimated SNR < 20dB, flag for separation
 
 **Pass criteria:**
 - Clean speech recording → returns `False`
