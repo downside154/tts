@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Audio files and model weights
+*.wav
+*.mp3
+*.mp4
+*.flac
+*.ogg
+*.m4a
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# Keep test fixtures
+!tests/fixtures/**
+
+# Docker volumes
+docker/volumes/
+
+# Storage
+storage/
+
+# Model cache
+models/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude
+.claude/
