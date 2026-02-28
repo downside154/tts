@@ -12,27 +12,24 @@ dependencies = [
     "celery>=5.3",
     "redis>=5.0",
     "pydantic-settings>=2.0",
-
     # Audio Processing
     "demucs>=4.0",
     "deepfilternet>=0.5",
     "pyloudnorm>=0.1",
     "soxr>=0.3",
     "soundfile>=0.12",
-
     # Speech Processing
     "pyannote-audio>=3.1",
     "faster-whisper>=1.0",
     "speechbrain>=1.0",
-
     # Korean NLP
     "g2pk>=0.9",
     "python-mecab-ko>=1.0",
     "jamo>=0.4",
-
     # Storage
     "sqlalchemy>=2.0",
     "psycopg2-binary>=2.9",
+    "python-multipart>=0.0.22",
 ]
 
 [project.optional-dependencies]

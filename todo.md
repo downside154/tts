@@ -119,9 +119,9 @@
 ---
 
 ### 1.3 — FastAPI app skeleton with health and upload endpoints
-- [ ] Implement `app/main.py`: create FastAPI app, include router, configure CORS, lifespan events
-- [ ] Implement `app/api/schemas.py`: Pydantic models for all request/response shapes defined in plan Section 3 API Contract
-- [ ] Implement `app/api/routes.py` with endpoints:
+- [x] Implement `app/main.py`: create FastAPI app, include router, configure CORS, lifespan events
+- [x] Implement `app/api/schemas.py`: Pydantic models for all request/response shapes defined in plan Section 3 API Contract
+- [x] Implement `app/api/routes.py` with endpoints:
   - `POST /v1/voices/clone` — accept multipart file upload, validate file type (video/audio MIME types), create Job record, persist file to storage, enqueue Celery task, return `{job_id, status}`
   - `GET /v1/jobs/{job_id}` — return job status, stage, progress, errors, speaker_profile_id
   - `POST /v1/tts/synthesize` — stub (returns 501 for now)
