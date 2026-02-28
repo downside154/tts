@@ -1,13 +1,14 @@
 """Tests for the audio preprocessing pipeline.
 
 Covers VAD segmentation, noise detection, source separation,
-and speech enhancement functionality.
+speech enhancement, and loudness normalization functionality.
 """
 
 import subprocess
 from pathlib import Path
 
 import numpy as np
+import pyloudnorm as pyln
 import pytest
 import soundfile as sf
 import torch
@@ -20,6 +21,7 @@ from app.pipelines.preprocess import (
     detect_needs_separation,
     detect_speech_segments,
     enhance_speech,
+    normalize_loudness,
     separate_vocals,
 )
 
@@ -794,3 +796,190 @@ class TestEnhanceSpeech:
             sys.modules.update(saved_mods)
             if saved_meta is not None:
                 ta.AudioMetaData = saved_meta
+
+
+def _generate_tone_at_loudness(
+    path: Path,
+    target_lufs: float,
+    duration: float = 3.0,
+    sample_rate: int = 48000,
+) -> Path:
+    """Generate a 440 Hz tone at a specific integrated loudness level."""
+    t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
+    tone = np.sin(2 * np.pi * 440.0 * t)
+
+    # Measure current loudness and adjust gain
+    meter = pyln.Meter(sample_rate)
+    current_lufs = meter.integrated_loudness(tone)
+    gain_db = target_lufs - current_lufs
+    gain_linear = 10 ** (gain_db / 20.0)
+    tone = tone * gain_linear
+
+    sf.write(str(path), tone, sample_rate, subtype="PCM_16")
+    return path
+
+
+class TestNormalizeLoudness:
+    def test_quiet_input_normalized_to_target(self, fixtures_dir: Path) -> None:
+        """Input at -30 LUFS is normalized to -23 LUFS within 0.5 LUFS tolerance."""
+        audio_path = _generate_tone_at_loudness(
+            fixtures_dir / "quiet.wav", target_lufs=-30.0
+        )
+
+        result = normalize_loudness(audio_path)
+
+        data, sr = sf.read(str(result), dtype="float64")
+        meter = pyln.Meter(sr)
+        output_lufs = meter.integrated_loudness(data)
+        assert abs(output_lufs - (-23.0)) < 0.5, (
+            f"Output loudness {output_lufs:.1f} LUFS not within 0.5 of -23.0"
+        )
+
+    def test_loud_input_normalized_to_target(self, fixtures_dir: Path) -> None:
+        """Input at -18 LUFS is normalized to -23 LUFS within 0.5 LUFS tolerance."""
+        audio_path = _generate_tone_at_loudness(
+            fixtures_dir / "loud.wav", target_lufs=-18.0
+        )
+
+        result = normalize_loudness(audio_path)
+
+        data, sr = sf.read(str(result), dtype="float64")
+        meter = pyln.Meter(sr)
+        output_lufs = meter.integrated_loudness(data)
+        assert abs(output_lufs - (-23.0)) < 0.5, (
+            f"Output loudness {output_lufs:.1f} LUFS not within 0.5 of -23.0"
+        )
+
+    def test_no_clipping_introduced(self, fixtures_dir: Path) -> None:
+        """Normalization does not introduce clipping (all samples within [-1, 1])."""
+        audio_path = _generate_tone_at_loudness(
+            fixtures_dir / "no_clip.wav", target_lufs=-30.0
+        )
+
+        result = normalize_loudness(audio_path)
+
+        data, _ = sf.read(str(result), dtype="float64")
+        peak = float(np.max(np.abs(data)))
+        assert peak <= 1.0, f"Clipping detected: peak = {peak}"
+
+    def test_output_is_valid_wav(self, fixtures_dir: Path) -> None:
+        """Output file is a valid WAV at the same sample rate."""
+        sr = 48000
+        audio_path = _generate_tone_at_loudness(
+            fixtures_dir / "valid.wav", target_lufs=-25.0, sample_rate=sr
+        )
+
+        result = normalize_loudness(audio_path)
+
+        info = sf.info(str(result))
+        assert info.samplerate == sr
+        assert info.channels == 1
+        assert info.subtype == "PCM_16"
+
+    def test_custom_target_lufs(self, fixtures_dir: Path) -> None:
+        """Custom target LUFS value is respected."""
+        audio_path = _generate_tone_at_loudness(
+            fixtures_dir / "custom.wav", target_lufs=-30.0
+        )
+
+        result = normalize_loudness(audio_path, target_lufs=-16.0)
+
+        data, sr = sf.read(str(result), dtype="float64")
+        meter = pyln.Meter(sr)
+        output_lufs = meter.integrated_loudness(data)
+        assert abs(output_lufs - (-16.0)) < 0.5, (
+            f"Output loudness {output_lufs:.1f} LUFS not within 0.5 of -16.0"
+        )
+
+    def test_file_not_found_raises_error(self, fixtures_dir: Path) -> None:
+        """Non-existent file raises FileNotFoundError."""
+        with pytest.raises(FileNotFoundError):
+            normalize_loudness(fixtures_dir / "nonexistent.wav")
+
+    def test_returns_path_object(self, fixtures_dir: Path) -> None:
+        """Return value is a Path object."""
+        audio_path = _generate_tone_at_loudness(
+            fixtures_dir / "path_check.wav", target_lufs=-25.0
+        )
+
+        result = normalize_loudness(audio_path)
+
+        assert isinstance(result, Path)
+
+    def test_output_filename_has_norm_suffix(self, fixtures_dir: Path) -> None:
+        """Output file has _norm suffix appended to the stem."""
+        audio_path = _generate_tone_at_loudness(
+            fixtures_dir / "suffix_test.wav", target_lufs=-25.0
+        )
+
+        result = normalize_loudness(audio_path)
+
+        assert result.stem == "suffix_test_norm"
+        assert result.suffix == ".wav"
+
+    def test_silent_audio_skips_normalization(self, fixtures_dir: Path) -> None:
+        """Silent audio (no measurable loudness) produces output without error."""
+        audio_path = fixtures_dir / "silent.wav"
+        samples = np.zeros(48000 * 2, dtype=np.float64)
+        sf.write(str(audio_path), samples, 48000, subtype="PCM_16")
+
+        result = normalize_loudness(audio_path)
+
+        assert result.exists()
+        data, _ = sf.read(str(result), dtype="float64")
+        assert np.max(np.abs(data)) < 0.01
+
+    def test_clipping_prevention_on_high_peak_input(self, fixtures_dir: Path) -> None:
+        """Input with high peak near 1.0 normalized upward doesn't clip."""
+        sr = 48000
+        duration = 3.0
+        t = np.linspace(0, duration, int(sr * duration), endpoint=False)
+        # Create a peaky signal (peak near 1.0) with moderate loudness
+        tone = np.sin(2 * np.pi * 440.0 * t)
+        tone += 0.5 * np.sin(2 * np.pi * 880.0 * t)
+        tone += 0.3 * np.sin(2 * np.pi * 1320.0 * t)
+        tone = tone / np.max(np.abs(tone)) * 0.95
+
+        audio_path = fixtures_dir / "high_peak.wav"
+        sf.write(str(audio_path), tone, sr, subtype="PCM_16")
+
+        # Read back to get the actual loudness (after PCM_16 quantization)
+        data, _ = sf.read(str(audio_path), dtype="float64")
+        meter = pyln.Meter(sr)
+        current_lufs = meter.integrated_loudness(data)
+
+        # Normalize upward by 6 dB — would clip without protection
+        result = normalize_loudness(audio_path, target_lufs=current_lufs + 6.0)
+
+        output_data, _ = sf.read(str(result), dtype="float64")
+        peak = float(np.max(np.abs(output_data)))
+        assert peak <= 1.0, f"Clipping detected: peak = {peak}"
+
+    def test_different_sample_rates(self, fixtures_dir: Path) -> None:
+        """Works correctly with different sample rates (24kHz)."""
+        audio_path = _generate_tone_at_loudness(
+            fixtures_dir / "sr24k.wav",
+            target_lufs=-28.0,
+            sample_rate=24000,
+        )
+
+        result = normalize_loudness(audio_path)
+
+        data, sr = sf.read(str(result), dtype="float64")
+        assert sr == 24000
+        meter = pyln.Meter(sr)
+        output_lufs = meter.integrated_loudness(data)
+        assert abs(output_lufs - (-23.0)) < 0.5
+
+    def test_already_at_target_loudness(self, fixtures_dir: Path) -> None:
+        """Audio already at target LUFS remains essentially unchanged."""
+        audio_path = _generate_tone_at_loudness(
+            fixtures_dir / "already_ok.wav", target_lufs=-23.0
+        )
+
+        result = normalize_loudness(audio_path)
+
+        data, sr = sf.read(str(result), dtype="float64")
+        meter = pyln.Meter(sr)
+        output_lufs = meter.integrated_loudness(data)
+        assert abs(output_lufs - (-23.0)) < 0.5

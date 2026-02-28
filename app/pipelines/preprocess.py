@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
+import pyloudnorm as pyln
 import soundfile as sf
 import torch
 import torchaudio
@@ -399,3 +400,74 @@ def _compute_segment_confidence(
 
     model.reset_states()  # type: ignore[operator]
     return sum(probs) / len(probs) if probs else 0.0
+
+
+def normalize_loudness(
+    audio_path: Path,
+    target_lufs: float = -23.0,
+) -> Path:
+    """Normalize audio loudness to a target level using EBU R128 (ITU-R BS.1770-4).
+
+    Measures the integrated loudness of the input audio and applies gain to
+    reach the target LUFS level. If normalization would introduce clipping
+    (samples exceeding [-1.0, 1.0]), the gain is reduced so the peak reaches
+    -0.1 dBFS instead, preventing distortion.
+
+    Args:
+        audio_path: Path to the input audio file (WAV).
+        target_lufs: Target integrated loudness in LUFS (default: -23.0).
+
+    Returns:
+        Path to the loudness-normalized WAV file (suffixed with ``_norm``).
+
+    Raises:
+        FileNotFoundError: If the audio file does not exist.
+    """
+    audio_path = Path(audio_path)
+    if not audio_path.exists():
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+    data, sample_rate = sf.read(str(audio_path), dtype="float64")
+
+    meter = pyln.Meter(sample_rate)
+    current_loudness = meter.integrated_loudness(data)
+
+    # If the input is effectively silent, skip normalization
+    if current_loudness == float("-inf"):
+        logger.warning(
+            "Audio %s has no measurable loudness — skipping normalization",
+            audio_path.name,
+        )
+        output_path = audio_path.with_stem(audio_path.stem + "_norm")
+        sf.write(str(output_path), data, sample_rate, subtype="PCM_16")
+        return output_path
+
+    normalized = pyln.normalize.loudness(data, current_loudness, target_lufs)
+
+    # Prevent clipping: if peak exceeds 1.0, reduce gain to keep peak at ~-0.1 dBFS
+    peak = float(np.max(np.abs(normalized)))
+    if peak > 1.0:
+        # -0.1 dBFS ≈ 0.9886
+        max_peak = 10 ** (-0.1 / 20.0)
+        normalized = normalized * (max_peak / peak)
+        logger.info(
+            "Reduced gain on %s to prevent clipping (peak was %.3f)",
+            audio_path.name,
+            peak,
+        )
+
+    output_path = audio_path.with_stem(audio_path.stem + "_norm")
+    sf.write(str(output_path), normalized, sample_rate, subtype="PCM_16")
+
+    # Verify the output loudness
+    output_loudness = meter.integrated_loudness(
+        sf.read(str(output_path), dtype="float64")[0]
+    )
+    logger.info(
+        "Normalized %s: %.1f LUFS → %.1f LUFS (target: %.1f)",
+        audio_path.name,
+        current_loudness,
+        output_loudness,
+        target_lufs,
+    )
+    return output_path

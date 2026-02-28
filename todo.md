@@ -320,7 +320,7 @@
 ---
 
 ### 2.7 — EBU R128 loudness normalization
-- [ ] Implement `normalize_loudness(audio_path: Path, target_lufs: float = -23.0) -> Path` in `app/pipelines/preprocess.py`
+- [x] Implement `normalize_loudness(audio_path: Path, target_lufs: float = -23.0) -> Path` in `app/pipelines/preprocess.py`
   - Use `pyloudnorm` for EBU R128 loudness measurement and normalization
   - Apply to reference segments before building speaker profile
 
