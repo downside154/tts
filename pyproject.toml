@@ -30,6 +30,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "psycopg2-binary>=2.9",
     "python-multipart>=0.0.22",
+    "torchcodec>=0.10.0",
 ]
 
 [project.optional-dependencies]

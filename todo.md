@@ -173,12 +173,12 @@
 ---
 
 ### 1.6 — Silero VAD segmentation
-- [ ] Implement VAD in `app/pipelines/preprocess.py`:
+- [x] Implement VAD in `app/pipelines/preprocess.py`:
   - `detect_speech_segments(audio_path: Path) -> list[Segment]` where `Segment = NamedTuple(start: float, end: float, confidence: float)`
   - Use Silero VAD with threshold=0.5, min_speech_duration=250ms
   - Merge adjacent segments with gaps < 300ms
   - Filter segments shorter than min_speech_duration
-- [ ] Handle edge case: no speech detected → return empty list with warning
+- [x] Handle edge case: no speech detected → return empty list with warning
 
 **Pass criteria:**
 - On a known test audio file with speech + silence, returns correct segment boundaries (within 100ms tolerance)
