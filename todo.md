@@ -349,6 +349,26 @@
 
 ---
 
+### 2.9 — Wrap-up and project hygiene
+- [ ] Create proper project documentation for completed Milestones 0-2:
+  - Update `README.md` with setup, run, test, and API usage instructions
+  - Add architecture/pipeline overview for ingest → preprocess → analyze flow
+  - Document known limitations and troubleshooting steps
+- [ ] Fix GitHub Actions so CI is working reliably:
+  - Diagnose current workflow failure(s)
+  - Update workflow config, commands, or environment setup as needed
+  - Verify lint/type/test jobs pass in CI
+- [ ] Do a final consistency sweep:
+  - Ensure `todo.md`, `plan.md`, and docs are aligned with actual implementation status
+  - Remove stale instructions and outdated pass criteria where applicable
+
+**Pass criteria:**
+- Project docs are complete enough for a new contributor to run the app and tests locally
+- GitHub Actions runs successfully on push/PR without manual intervention
+- No known broken CI checks remain for lint/type/test pipeline
+
+---
+
 ## Milestone 3: End-to-End TTS (Weeks 5-7)
 
 ### 3.1 — TTSBackend protocol and Fish Speech integration

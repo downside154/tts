@@ -1,31 +1,28 @@
 name: CI
 
 on:
-  push:
-    branches: [main, develop]
   pull_request:
     branches: [main, develop]
 
 jobs:
-  lint:
+  lint_and_typecheck:
+    name: lint and typecheck
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13.12"
       - uses: astral-sh/setup-uv@v5
         with:
           version: "latest"
+      - name: Install MeCab (build dependency for python-mecab-ko)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mecab libmecab-dev mecab-ipadic-utf8
       - run: uv sync --dev
       - name: Ruff lint
         run: uv run ruff check .
-
-  typecheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          version: "latest"
-      - run: uv sync --dev
       - name: Type check
         run: uv run ty check app/
 
@@ -33,11 +30,14 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13.12"
       - uses: astral-sh/setup-uv@v5
         with:
           version: "latest"
-      - name: Install FFmpeg
-        run: brew install ffmpeg
+      - name: Install FFmpeg and MeCab
+        run: brew install ffmpeg mecab
       - run: uv sync --dev
       - name: Run tests with coverage
         run: uv run pytest tests/ -v --cov=app --cov-report=term-missing --cov-fail-under=98
